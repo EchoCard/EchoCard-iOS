@@ -47,6 +47,13 @@ final class FirmwareUpdateService: ObservableObject {
 
     @AppStorage("fw_server_base_url") private var serverBaseURL: String = AppConfig.fwServerBaseURL
 
+    /// 与 Android `serverBaseUrl.trimEnd('/')` 一致，避免 `.../echocard/` 拼出 `//api/...`。
+    private var normalizedServerBaseURL: String {
+        var s = serverBaseURL
+        while s.hasSuffix("/") { s.removeLast() }
+        return s
+    }
+
     private let ble: any CallMateBLELibraryClient
     private var cancellables = Set<AnyCancellable>()
     private var waitingForReconnectAfterUpdate: Bool = false
@@ -257,7 +264,7 @@ final class FirmwareUpdateService: ObservableObject {
         lastError = nil
         defer { isChecking = false }
 
-        let urlString = "\(serverBaseURL)/api/firmware/latest?device=\(device)"
+        let urlString = "\(normalizedServerBaseURL)/api/firmware/latest?device=\(device)"
         print("[FW] checkForUpdate chip=\(ble.deviceChipName ?? "nil") device=\(device) URL: \(urlString)")
 
         guard let url = URL(string: urlString) else {
@@ -516,7 +523,7 @@ final class FirmwareUpdateService: ObservableObject {
         if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") {
             fullURLString = urlString
         } else {
-            fullURLString = serverBaseURL + urlString
+            fullURLString = normalizedServerBaseURL + urlString
         }
         print("[FW] Download URL: \(fullURLString)")
         guard let url = URL(string: fullURLString) else {

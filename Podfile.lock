@@ -14,12 +14,12 @@ SPEC REPOS:
 
 EXTERNAL SOURCES:
   CallMateBLEKit:
-    :podspec: "ThirdParty/CallMateBLEKit/CallMateBLEKit.podspec"
+    :podspec: ThirdParty/CallMateBLEKit/CallMateBLEKit.podspec
 
 SPEC CHECKSUMS:
-  CallMateBLEKit: 61bb0d25ad06f7d58f33bdd95536551254d66488
+  CallMateBLEKit: 5ee05ed8a5e008d72e90858da7118805ee77a915
   libopus: ad5f060dcb8f30f139777244d70f9111f1c80863
 
-PODFILE CHECKSUM: 7bd3cd1befa589178ac5f67ac0ea7e2873a340b9
+PODFILE CHECKSUM: 08e89ff43863f0dc1f3aa057e6fd3962551859e1
 
 COCOAPODS: 1.16.2

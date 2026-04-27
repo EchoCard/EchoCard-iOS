@@ -30,4 +30,27 @@ post_install do |installer|
       build_file.remove_from_project
     end
   end
+
+  # 预编译 xcframework：CocoaPods 会误把 SWIFT_INCLUDE_PATHS 指到空目录
+  # PODS_CONFIGURATION_BUILD_DIR/CallMateBLEKit，导致 CallMate 模块里类型「丢失」
+  # （无 shared、协议不可见）。应指向解包后的 XCFramework 中间体。
+  %w[debug release].each do |cfg|
+    xcpath = File.join(installer.sandbox.root, 'Target Support Files', 'Pods-CallMate', "Pods-CallMate.#{cfg}.xcconfig")
+    next unless File.file?(xcpath)
+    t = File.read(xcpath)
+    t = t.gsub(
+      'SWIFT_INCLUDE_PATHS = $(inherited) "${PODS_CONFIGURATION_BUILD_DIR}/CallMateBLEKit"',
+      'SWIFT_INCLUDE_PATHS = $(inherited) "${PODS_XCFRAMEWORKS_BUILD_DIR}/CallMateBLEKit"',
+    )
+    # 解包后模拟器是 CallMateBLEKit-sim.a，真机是 CallMateBLEKit-ios.a；CocoaPods 会误写为始终 -l CallMateBLEKit-ios
+    t = t.gsub(
+      /OTHER_LDFLAGS = [^\n]*\n(?:OTHER_LDFLAGS\[sdk=[^\n]*\n)*/,
+      <<~'XC'      
+        OTHER_LDFLAGS = $(inherited) -ObjC -l"libopus"
+        OTHER_LDFLAGS[sdk=iphonesimulator*] = $(inherited) "${PODS_XCFRAMEWORKS_BUILD_DIR}/CallMateBLEKit/CallMateBLEKit-sim.a"
+        OTHER_LDFLAGS[sdk=iphoneos*] = $(inherited) "${PODS_XCFRAMEWORKS_BUILD_DIR}/CallMateBLEKit/CallMateBLEKit-ios.a"
+      XC
+    )
+    File.write(xcpath, t)
+  end
 end
