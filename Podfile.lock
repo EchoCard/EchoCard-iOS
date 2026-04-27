@@ -1,0 +1,25 @@
+PODS:
+  - CallMateBLEKit (0.1.0)
+  - libopus (1.1):
+    - libopus/float (= 1.1)
+  - libopus/float (1.1)
+
+DEPENDENCIES:
+  - CallMateBLEKit (from `ThirdParty/CallMateBLEKit/CallMateBLEKit.podspec`)
+  - libopus
+
+SPEC REPOS:
+  trunk:
+    - libopus
+
+EXTERNAL SOURCES:
+  CallMateBLEKit:
+    :podspec: "ThirdParty/CallMateBLEKit/CallMateBLEKit.podspec"
+
+SPEC CHECKSUMS:
+  CallMateBLEKit: 61bb0d25ad06f7d58f33bdd95536551254d66488
+  libopus: ad5f060dcb8f30f139777244d70f9111f1c80863
+
+PODFILE CHECKSUM: 7bd3cd1befa589178ac5f67ac0ea7e2873a340b9
+
+COCOAPODS: 1.16.2

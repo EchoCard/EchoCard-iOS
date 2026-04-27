@@ -1,0 +1,12 @@
+// AppConfig.swift — 本地配置，不提交到 git
+// 复制此文件为 AppConfig.swift 并填入你的服务器地址
+enum AppConfig {
+    static let apiBaseURL        = "https://YOUR_API_SERVER"
+    static let controlApiBaseURL = "https://YOUR_CONTROL_SERVER"
+    static let voiceApiBaseURL   = "http://YOUR_VOICE_API_SERVER"
+    static let wsBaseURL         = "ws://YOUR_WS_SERVER"
+    static let fwServerBaseURL   = "http://YOUR_FIRMWARE_SERVER/echocard"
+
+    static let hardcodedPidId    = "YOUR_PID_ID"
+    static let hardcodedAppCode  = "YOUR_APP_CODE"
+}

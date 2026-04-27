@@ -1,0 +1,13 @@
+/* 固件更新 */
+"fw_error_invalid_url" = "服务器地址无效";
+"fw_error_http" = "服务器返回 HTTP %@：%@";
+"fw_status_latest" = "当前最新：%@";
+"fw_error_check_failed" = "检查更新失败：%@";
+"fw_error_no_metadata" = "无固件信息";
+"fw_status_downloading" = "正在下载固件...";
+"fw_status_starting" = "正在开始更新...";
+"fw_status_uploading" = "正在上传...";
+"fw_status_uploading_progress" = "正在上传... %d%%（%u/%d）· %.1f KB/s";
+"fw_status_finalizing" = "正在完成...";
+"fw_status_rebooting" = "正在重启设备...";
+"fw_status_update_failed" = "更新失败";

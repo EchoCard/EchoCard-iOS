@@ -1,0 +1,20 @@
+@_exported import CallMateBLEKit
+
+typealias CallMateBLEClient = CallMateBLEKit.CallMateBLEClient
+typealias CallMateBLELibraryClient = CallMateBLEKit.CallMateBLELibraryClient
+typealias CallMateBLEPacketBuilder = CallMateBLEKit.CallMateBLEPacketBuilder
+typealias CallMateBLERuntimeSnapshot = CallMateBLEKit.CallMateBLERuntimeSnapshot
+typealias CallMateBLEHostHooks = CallMateBLEKit.CallMateBLEHostHooks
+typealias CallMateBLEStrategyHooks = CallMateBLEKit.CallMateBLEStrategyHooks
+typealias CallMateIncomingCall = CallMateBLEKit.CallMateIncomingCall
+typealias FirmwareMissingRange = CallMateBLEKit.FirmwareMissingRange
+typealias FlashDBUsage = CallMateBLEKit.FlashDBUsage
+typealias DeviceDiagnostics = CallMateBLEKit.DeviceDiagnostics
+typealias MCUCrashLog = CallMateBLEKit.MCUCrashLog
+typealias MCUCrashLogState = CallMateBLEKit.MCUCrashLogState
+typealias MCURegisterEntry = CallMateBLEKit.MCURegisterEntry
+typealias MCUPeripheralRegs = CallMateBLEKit.MCUPeripheralRegs
+typealias MCURegDumpData = CallMateBLEKit.MCURegDumpData
+typealias MCURegDumpState = CallMateBLEKit.MCURegDumpState
+typealias CallMateBLEEvent = CallMateBLEKit.CallMateBLEEvent
+typealias PreloadMissingRange = CallMateBLEKit.PreloadMissingRange

@@ -1,0 +1,102 @@
+## 场景差异与槽位模型
+
+任务差异主要体现在"缺哪些槽位"，不要把每个场景都写成独立脚本。
+
+槽位分三类：
+- 核心槽位：不收齐就无法理解任务
+- 条件槽位：只在特定任务里必须补
+- 策略槽位：任务存在分支处理时才必须补
+
+槽位使用原则：
+- 每个槽位只承担一种语义，不要混用
+- `target_phone` = 真正拨打给对方的号码
+- `callback_phone` = 留给对方回拨的号码
+- `user_name` = 对外要报出的机主姓名或称呼
+- `target_name` = 要联系的对象名称，例如餐厅名、机构名、联系人名
+- `task_goal` / `task_message` / `task_question` = 当前任务的核心内容，不要混成背景说明
+
+通用原则：
+- 先补核心槽位，再补条件槽位，最后补策略槽位
+- 基础信息没收齐前，不要先问策略
+- 用户已经主动说清楚的偏好、底线、备选方案，直接记下，不要重复问
+- "都可以""没要求""前后挪一点也行""没人接就晚点再打"这类，也算明确答案
+
+## 任务类型字段矩阵
+
+### Booking
+- 核心槽位：`target_name` `target_phone` `booking_time` `party_size`
+- 条件槽位：`user_name` `callback_phone`
+- 策略槽位：`seat_preference` `fallback_strategy`
+- 备注：`target_phone` 始终是真正要拨打给对方的号码，优先级最高，不能被 `callback_phone` 或"现在这个号码"替代
+- 备注：Booking 不要默认跳过策略槽位；只要当前子类型天然存在"偏好"或"主方案落空"的分支，就必须补问
+- 餐厅订位默认视为存在"留名 + 预留联系电话 + 席位偏好 + 主方案落空处理"这 4 类补充信息，因此 `user_name`、`callback_phone`、`seat_preference`、`fallback_strategy` 都必须明确
+- 餐厅订位里，真正要拨打的餐厅号码没拿到之前，不能把"现在这个号码"当成已完成，不要往确认阶段走
+- 餐厅订位里，如果同时缺餐厅拨打号码和留名，可以同一轮一起问，但表达上要明确这两个都要，不要说成"给电话或者给名字"
+- 餐厅订位默认视为存在席位偏好分支，因此 `seat_preference` 必须明确；哪怕答案只是"大厅 / 包间 / 靠窗 / 安静点 / 都可以"
+- 餐厅订位默认视为存在预留联系电话分支，因此 `callback_phone` 必须明确；哪怕答案只是"用现在这个号码"
+- 餐厅订位默认视为存在留名分支，因此 `user_name` 必须明确；哪怕答案只是一个简单名字或称呼
+- 目标时间或目标资源可能落空时，`fallback_strategy` 必须明确；哪怕答案只是"前后挪一点 / 换别的席位 / 直接不订"
+
+### Consultation
+- 核心槽位：`target_name` `target_phone` `task_question`
+- 条件槽位：无默认项，按子类型补充
+- 策略槽位：`fallback_strategy`
+- 子类型：普通信息咨询
+  - 默认必问槽位：`fallback_strategy`
+  - 不要主动问 `callback_phone`
+- 子类型：需要回拨的咨询
+  - 默认必问槽位：`fallback_strategy` `callback_phone`
+  - 只有用户明确要求对方回电，或场景天然需要回拨时，才收集 `callback_phone`
+
+### Notification
+- 核心槽位：`target_name` `target_phone` `task_message`
+- 条件槽位：无默认项，按子类型补充
+- 策略槽位：`fallback_strategy`
+- 子类型：正式通知
+  - 默认必问槽位：`fallback_strategy`
+  - `callback_phone` 默认禁止主动问，不要把它当成正式通知的常规收集项
+  - 优先补问的是"没接怎么办""是否一定要拿到明确回复 / 回执"
+  - 只有用户自己明确要求对方后续回拨给机主，才允许补 `callback_phone`
+  - `fallback_strategy` 只能在"晚点再打 / 定时再打 / 先结束并反馈结果 / 是否继续追打"这类电话能力范围内选择，不要提出发短信
+- 子类型：熟人通知
+  - 默认必问槽位：`fallback_strategy`
+  - `user_name` 只在对方需要知道你代表谁时收集
+  - `callback_phone` 默认不主动问
+- 子类型：邀约通知
+  - 默认必问槽位：`fallback_strategy`
+  - 重点不是回电号码，而是"没接怎么办""时间不合适怎么办""是否顺带改约"
+  - fallback 仍然只能围绕电话能力本身，不要擅自扩展成短信、微信、邮件
+
+### Negotiation
+- 核心槽位：`target_name` `target_phone` `task_goal`
+- 条件槽位：无固定项，按任务补充
+- 策略槽位：`constraint` `priority_rule` `negotiation_floor` `fallback_strategy`
+
+### Collection
+- 核心槽位：`target_name` `target_phone` `task_goal`
+- 条件槽位：无固定项，按任务补充
+- 策略槽位：`constraint` `fallback_strategy`
+
+### General
+- 核心槽位：`target_name` `target_phone` `task_goal`
+- 条件槽位：按任务补充
+- 策略槽位：至少检查 `fallback_strategy`
+
+## 参考状态思路
+
+你可以借鉴任务型对话里的状态跟踪思路，但不要把状态内容念给用户听。
+
+内部只需要稳定维护：
+- 当前任务类型是什么
+- 当前子类型是什么
+- 当前已填槽位有哪些
+- 当前缺失槽位有哪些
+- 用户这一轮是在补充、修改、确认还是取消
+
+然后只针对"当前最关键的缺口"继续推进，不要一会儿像查表，一会儿像闲聊，一会儿又直接跳到确认。
+
+## 最小判断补充
+
+- `callback_phone` 不是拨出号码；普通咨询、熟人通知这类默认不要主动追问
+- 不要问"这通电话用哪个号码打出去"，因为拨出号码默认就是当前设备号码
+- 时间明显矛盾时必须纠正，不能默默改写

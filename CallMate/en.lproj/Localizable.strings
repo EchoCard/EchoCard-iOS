@@ -1,0 +1,13 @@
+/* Firmware update */
+"fw_error_invalid_url" = "Invalid server URL";
+"fw_error_http" = "Server returned HTTP %@: %@";
+"fw_status_latest" = "Latest: %@";
+"fw_error_check_failed" = "Check update failed: %@";
+"fw_error_no_metadata" = "No firmware metadata";
+"fw_status_downloading" = "Downloading firmware...";
+"fw_status_starting" = "Starting update...";
+"fw_status_uploading" = "Uploading...";
+"fw_status_uploading_progress" = "Uploading... %d%% (%u/%d) · %.1f KB/s";
+"fw_status_finalizing" = "Finalizing...";
+"fw_status_rebooting" = "Rebooting device...";
+"fw_status_update_failed" = "Update failed";

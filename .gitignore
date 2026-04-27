@@ -1,0 +1,7 @@
+.DS_Store
+Pods/
+*.xcworkspace
+xcuserdata/
+DerivedData/
+build/
+CallMate/App/AppConfig.swift
