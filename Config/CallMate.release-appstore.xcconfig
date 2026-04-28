@@ -1,0 +1,6 @@
+// App Store / release.sh 使用团队 MY2B9QQ34R；Debug 仍由工程内设置（如 Q322S2LD93）。
+// 修改团队时只改本文件，并确保 App Store Connect 上 Bundle ID 归属该团队。
+
+#include "../Pods/Target Support Files/Pods-CallMate/Pods-CallMate.release.xcconfig"
+
+DEVELOPMENT_TEAM = MY2B9QQ34R

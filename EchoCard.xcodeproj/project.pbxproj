@@ -38,7 +38,7 @@
 /* Begin PBXFileReference section */
 		118303478650077FC1E56EBA /* libPods-CallMate.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CallMate.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3D7F8A4AC0E98D7BEC09B772 /* Pods-CallMate.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CallMate.release.xcconfig"; path = "Target Support Files/Pods-CallMate/Pods-CallMate.release.xcconfig"; sourceTree = "<group>"; };
-		E7A1C9B02F5000010057B50D /* CallMate.release-appstore.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = Config/CallMate.release-appstore.xcconfig; sourceTree = "<group>"; };
+		E7A1C9B02F5000010057B50D /* CallMate.release-appstore.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = CallMate.release-appstore.xcconfig; sourceTree = "<group>"; };
 		48F556DDD28560E33B10A367 /* Pods-CallMate.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CallMate.debug.xcconfig"; path = "Target Support Files/Pods-CallMate/Pods-CallMate.debug.xcconfig"; sourceTree = "<group>"; };
 		A1B2C3D52F4000010057B50D /* CallMateLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CallMateLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1C2D3E42F5000010057B50D /* CallMateUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CallMateUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
