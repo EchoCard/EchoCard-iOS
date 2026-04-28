@@ -19,8 +19,8 @@ enum AppConfig {
     /// xiaozhi WebSocket（通话 / 配置 / 外呼对话等）。
     static let wsBaseURL = "wss://chat-dev.echocard.com"
 
-    /// OTA 固件元数据与下载基址（与 Android `fw_server_base_url` 一致）。
-    static let fwServerBaseURL = "http://120.24.162.199/echocard"
+    /// OTA 固件元数据与下载基址（与 Android `fw_server_base_url` 一致；经 LB 的 HTTPS）。
+    static let fwServerBaseURL = "https://ota-dev.echocard.com/echocard"
 
     // MARK: 测试用注册凭据（仅开发环境；公开仓库请改为占位符）
     static let hardcodedPidId = "31ead3ac-ede8-4e81-b405-12be65f7b7e8"

@@ -16,8 +16,8 @@ enum AppConfig {
     /// 通话 / 配置等 WebSocket（xiaozhi）
     static let wsBaseURL = "wss://chat-dev.echocard.com"
 
-    /// OTA：元数据与下载基址（明文 HTTP 时需保留 Info.plist 里对应 ATS 例外）
-    static let fwServerBaseURL = "http://120.24.162.199/echocard"
+    /// OTA：元数据与下载基址（HTTPS；若仍用明文 IP 需在 Info.plist 保留对应 ATS 例外）
+    static let fwServerBaseURL = "https://ota-dev.echocard.com/echocard"
 
     static let hardcodedPidId = "YOUR_PID_ID"
     static let hardcodedAppCode = "YOUR_APP_CODE"
