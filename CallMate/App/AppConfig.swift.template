@@ -1,12 +1,24 @@
-// AppConfig.swift — 本地配置，不提交到 git
-// 复制此文件为 AppConfig.swift 并填入你的服务器地址
+// AppConfig.swift.template — 与仓库内 AppConfig.swift 保持同步；改域名时两处一起改。
+//
+// 后端入口只在本文件 / AppConfig.swift 维护，避免在业务里散落 URL：
+//   • apiBaseURL / controlApiBaseURL / voiceApiBaseURL → BackendAuth、TTSFiller、ChatSummary、语音与 Onboarding 等
+//   • wsBaseURL → WebSocketService（xiaozhi）
+//   • fwServerBaseURL → FirmwareUpdateService 默认 OTA 基址（与 Android fw_server_base_url 对齐）；换 API/聊天域时通常保持不变
+//
 enum AppConfig {
-    static let apiBaseURL        = "https://YOUR_API_SERVER"
-    static let controlApiBaseURL = "https://YOUR_CONTROL_SERVER"
-    static let voiceApiBaseURL   = "http://YOUR_VOICE_API_SERVER"
-    static let wsBaseURL         = "ws://YOUR_WS_SERVER"
-    static let fwServerBaseURL   = "http://YOUR_FIRMWARE_SERVER/echocard"
+    // MARK: HTTPS API（REST / 语音克隆等 HTTP）
+    private static let apiHTTPSBase = "https://api-dev.echocard.com"
 
-    static let hardcodedPidId    = "YOUR_PID_ID"
-    static let hardcodedAppCode  = "YOUR_APP_CODE"
+    static let apiBaseURL = apiHTTPSBase
+    static let controlApiBaseURL = apiHTTPSBase
+    static let voiceApiBaseURL = apiHTTPSBase
+
+    /// 通话 / 配置等 WebSocket（xiaozhi）
+    static let wsBaseURL = "wss://chat-dev.echocard.com"
+
+    /// OTA：元数据与下载基址（明文 HTTP 时需保留 Info.plist 里对应 ATS 例外）
+    static let fwServerBaseURL = "http://120.24.162.199/echocard"
+
+    static let hardcodedPidId = "YOUR_PID_ID"
+    static let hardcodedAppCode = "YOUR_APP_CODE"
 }

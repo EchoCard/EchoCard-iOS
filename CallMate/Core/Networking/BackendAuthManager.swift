@@ -21,7 +21,7 @@ final class BackendAuthManager: ObservableObject {
     // MARK: - Config
 
     private let apiBaseURL = URL(string: AppConfig.apiBaseURL)!
-    /// 控制面（APNs `command` / dial、`POST /api/callback` 等），与设备侧 `echocard-control.xiaozhi.me` 一致；勿与 `apiBaseURL` 混用。
+    /// 控制面（APNs `command` / dial、`POST /api/callback` 等）。若与 `apiBaseURL` 不同域，在此单独配置 `AppConfig.controlApiBaseURL`。
     private let controlApiBaseURL = URL(string: AppConfig.controlApiBaseURL)!
 
     private let hardcodedPidId = AppConfig.hardcodedPidId
@@ -191,7 +191,7 @@ final class BackendAuthManager: ObservableObject {
         }
     }
 
-    /// 控制面结果回传：`request_id` 由 `echocard-control` 签发，须 POST 至同域 `/api/callback`（`echocard.xiaozhi.me` 上该路径会 404）。
+    /// 控制面结果回传：`request_id` 由控制面签发，须 POST 至该域 `/api/callback`（勿误发到仅业务 API 域）。
     func postControlCallback(requestId: String, data: [String: Any]) async {
         guard !requestId.isEmpty else {
             print("[Auth] postControlCallback skipped: empty request_id")
