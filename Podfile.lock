@@ -1,11 +1,11 @@
 PODS:
-  - CallMateBLEKit (0.1.0)
+  - CallMateBLEKit (0.1.2)
   - libopus (1.1):
     - libopus/float (= 1.1)
   - libopus/float (1.1)
 
 DEPENDENCIES:
-  - CallMateBLEKit (from `ThirdParty/CallMateBLEKit/CallMateBLEKit.podspec`)
+  - CallMateBLEKit (from `/Users/macbook/Desktop/CallMate/ios-ble`)
   - libopus
 
 SPEC REPOS:
@@ -14,12 +14,12 @@ SPEC REPOS:
 
 EXTERNAL SOURCES:
   CallMateBLEKit:
-    :podspec: ThirdParty/CallMateBLEKit/CallMateBLEKit.podspec
+    :path: "/Users/macbook/Desktop/CallMate/ios-ble"
 
 SPEC CHECKSUMS:
-  CallMateBLEKit: 5ee05ed8a5e008d72e90858da7118805ee77a915
+  CallMateBLEKit: dd4d6436953cb9e77438d5018323523735110d89
   libopus: ad5f060dcb8f30f139777244d70f9111f1c80863
 
-PODFILE CHECKSUM: 08e89ff43863f0dc1f3aa057e6fd3962551859e1
+PODFILE CHECKSUM: 8a285b4e314fb873ba5f3c17c123a47feb0de1db
 
 COCOAPODS: 1.16.2

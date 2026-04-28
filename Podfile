@@ -1,9 +1,24 @@
 platform :ios, '15.0'
 workspace 'EchoCard.xcworkspace'
 
+_IOS_ROOT = File.expand_path(__dir__)
+_IOS_BLE_LOCAL = File.expand_path('../ios-ble', _IOS_ROOT)
+# 与主仓库 submodule 并排时：存在 Sources + podspec → 改用本地源码，便于改完 BLE 立刻编 App。
+USE_LOCAL_BLE_KIT =
+  File.directory?(_IOS_BLE_LOCAL) &&
+  File.file?(File.join(_IOS_BLE_LOCAL, 'CallMateBLEKit.podspec')) &&
+  File.directory?(File.join(_IOS_BLE_LOCAL, 'Sources'))
+
+unless ENV['FASTLANE_LANE']
+  Pod::UI.puts("CallMateBLEKit: #{ USE_LOCAL_BLE_KIT ? '📎 本地源码 ' + _IOS_BLE_LOCAL : '📦 预编译 xcframework (ThirdParty/podspec)' }")
+end
+
 target 'CallMate' do
-  # 本仓内 podspec 仅 :http 拉本 repo 的公开 Release 里的 xcframework
-  pod 'CallMateBLEKit', :podspec => 'ThirdParty/CallMateBLEKit/CallMateBLEKit.podspec'
+  if USE_LOCAL_BLE_KIT
+    pod 'CallMateBLEKit', :path => _IOS_BLE_LOCAL
+  else
+    pod 'CallMateBLEKit', :podspec => 'ThirdParty/CallMateBLEKit/CallMateBLEKit.podspec'
+  end
   pod 'libopus'
 end
 
@@ -31,7 +46,8 @@ post_install do |installer|
     end
   end
 
-  # 预编译 xcframework：CocoaPods 会误把 SWIFT_INCLUDE_PATHS 指到空目录
+  unless USE_LOCAL_BLE_KIT
+    # 预编译 xcframework：CocoaPods 会误把 SWIFT_INCLUDE_PATHS 指到空目录
   # PODS_CONFIGURATION_BUILD_DIR/CallMateBLEKit，导致 CallMate 模块里类型「丢失」
   # （无 shared、协议不可见）。应指向解包后的 XCFramework 中间体。
   %w[debug release].each do |cfg|
@@ -52,5 +68,6 @@ post_install do |installer|
       XC
     )
     File.write(xcpath, t)
+  end
   end
 end
