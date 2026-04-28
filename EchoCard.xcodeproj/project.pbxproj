@@ -38,10 +38,10 @@
 /* Begin PBXFileReference section */
 		118303478650077FC1E56EBA /* libPods-CallMate.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CallMate.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3D7F8A4AC0E98D7BEC09B772 /* Pods-CallMate.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CallMate.release.xcconfig"; path = "Target Support Files/Pods-CallMate/Pods-CallMate.release.xcconfig"; sourceTree = "<group>"; };
-		E7A1C9B02F5000010057B50D /* CallMate.release-appstore.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = CallMate.release-appstore.xcconfig; sourceTree = "<group>"; };
 		48F556DDD28560E33B10A367 /* Pods-CallMate.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CallMate.debug.xcconfig"; path = "Target Support Files/Pods-CallMate/Pods-CallMate.debug.xcconfig"; sourceTree = "<group>"; };
 		A1B2C3D52F4000010057B50D /* CallMateLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CallMateLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1C2D3E42F5000010057B50D /* CallMateUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CallMateUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E7A1C9B02F5000010057B50D /* CallMate.release-appstore.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = "CallMate.release-appstore.xcconfig"; sourceTree = "<group>"; };
 		FA4E94632F3075970057B50D /* CallMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CallMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -228,7 +228,7 @@
 					};
 				};
 			};
-			buildConfigurationList = FA4E945E2F3075970057B50D /* Build configuration list for PBXProject "CallMate" */;
+			buildConfigurationList = FA4E945E2F3075970057B50D /* Build configuration list for PBXProject "EchoCard" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -338,8 +338,8 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 236;
-				DEVELOPMENT_TEAM = Q322S2LD93;
+				CURRENT_PROJECT_VERSION = 237;
+				DEVELOPMENT_TEAM = MY2B9QQ34R;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "CallMateLiveActivity-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -348,7 +348,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.9.222;
+				MARKETING_VERSION = 1.9.223;
 				PRODUCT_BUNDLE_IDENTIFIER = greater.vaca.CallMate.LiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -365,7 +365,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 236;
+				CURRENT_PROJECT_VERSION = 237;
 				DEVELOPMENT_TEAM = MY2B9QQ34R;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "CallMateLiveActivity-Info.plist";
@@ -375,7 +375,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.9.222;
+				MARKETING_VERSION = 1.9.223;
 				PRODUCT_BUNDLE_IDENTIFIER = greater.vaca.CallMate.LiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -391,7 +391,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 236;
+				CURRENT_PROJECT_VERSION = 237;
 				DEVELOPMENT_TEAM = Q322S2LD93;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
@@ -418,7 +418,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 236;
+				CURRENT_PROJECT_VERSION = 237;
 				DEVELOPMENT_TEAM = Q322S2LD93;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
@@ -574,8 +574,8 @@
 				CODE_SIGN_ENTITLEMENTS = CallMate/CallMate.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 236;
-				DEVELOPMENT_TEAM = Q322S2LD93;
+				CURRENT_PROJECT_VERSION = 237;
+				DEVELOPMENT_TEAM = MY2B9QQ34R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
@@ -604,7 +604,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9.222;
+				MARKETING_VERSION = 1.9.223;
 				PRODUCT_BUNDLE_IDENTIFIER = greater.vaca.CallMate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -634,7 +634,7 @@
 				CODE_SIGN_ENTITLEMENTS = CallMate/CallMateRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 236;
+				CURRENT_PROJECT_VERSION = 237;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
@@ -663,7 +663,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9.222;
+				MARKETING_VERSION = 1.9.223;
 				PRODUCT_BUNDLE_IDENTIFIER = greater.vaca.CallMate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -704,7 +704,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		FA4E945E2F3075970057B50D /* Build configuration list for PBXProject "CallMate" */ = {
+		FA4E945E2F3075970057B50D /* Build configuration list for PBXProject "EchoCard" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FA4E946C2F3075990057B50D /* Debug */,
