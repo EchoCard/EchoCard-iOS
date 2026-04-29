@@ -512,10 +512,17 @@ extension CallSessionController: WebSocketServiceDelegate {
 
     func webSocketDidReceiveToolCall(callId: String, name: String, arguments: [String: Any]) {
         guard isActiveController else {
+            if scene == .updateConfig {
+                print("\(WebSocketService.outboundAIUCv1Tag) tool_dropped side=client reason=inactive_controller name=\(name) call_id=\(callId)")
+            }
             print("[OutboundAI][Tool] dropped (not active controller) name=\(name) callId=\(callId) — another session may own WS")
             return
         }
         print("[OutboundAI][Tool] recv name=\(name) scene=\(scene.rawValue) callId=\(callId) argKeys=\(Array(arguments.keys))")
+        if scene == .updateConfig {
+            let sortedKeys = Array(arguments.keys).sorted().joined(separator: ",")
+            print("\(WebSocketService.outboundAIUCv1Tag) tool_handler_enter side=client scene=\(scene.rawValue) name=\(name) call_id=\(callId) arg_keys=\(sortedKeys)")
+        }
         if name == "notify_owner_to_pickup" {
             handleNotifyOwnerToPickup(callId: callId, arguments: arguments)
             return
@@ -724,6 +731,9 @@ extension CallSessionController: WebSocketServiceDelegate {
             return
         }
         guard name == "display_rule_change" else {
+            if scene == .updateConfig {
+                print("\(WebSocketService.outboundAIUCv1Tag) tool_no_handler side=client name=\(name) call_id=\(callId) note=no_matching_branch")
+            }
             print("[WS] tool_call ignored name=\(name) args=\(arguments)")
             return
         }

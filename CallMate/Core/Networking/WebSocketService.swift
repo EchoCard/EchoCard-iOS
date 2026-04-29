@@ -194,6 +194,8 @@ struct IncomingCallContext {
 
 /// WebSocket 服务 - 处理与服务端的通信
 class WebSocketService: NSObject, ObservableObject {
+    /// 与 `[OutboundAI][Tool]`、`[OutboundAI][WS]` 同族过滤前缀；联调/云端归因时 grep **`OutboundAI`** 或 **`UCv1`**（update_config v1 客户端侧证据链）。
+    static let outboundAIUCv1Tag = "[OutboundAI][UCv1]"
     private struct DownstreamAudioParams: Sendable {
         let format: WSAudioFormat?
         let sampleRate: Int?
@@ -695,7 +697,11 @@ class WebSocketService: NSObject, ObservableObject {
     /// 发送 Hello 握手
     @MainActor
     private func sendHello() {
-        print("[PromptTrace] sendHello: scene=\(helloScene.rawValue) callHelloPromptOverride=\(callHelloPromptOverride == nil ? "nil ← MISSING PROMPT" : "\(callHelloPromptOverride!.count)chars ✓")")
+        if helloScene == .call {
+            print("[PromptTrace] sendHello: scene=call callHelloPromptOverride=\(callHelloPromptOverride == nil ? "nil ← MISSING PROMPT" : "\(callHelloPromptOverride!.count)chars ✓")")
+        } else if helloScene != .updateConfig {
+            print("[PromptTrace] sendHello: scene=\(helloScene.rawValue) callHelloPromptOverride=\(callHelloPromptOverride == nil ? "nil" : "\(callHelloPromptOverride!.count)chars")")
+        }
         var audioParams: [String: Any] = [
             "sample_rate": 16000,
             "channels": 1
@@ -728,8 +734,7 @@ class WebSocketService: NSObject, ObservableObject {
         } else if helloScene == .updateConfig {
             // v1 (update_config client spec, 2026-04-28): prompt is fully owned
             // by the server. Client only injects template_vars below — no
-            // `initiate.prompt` is sent.
-            print("[WS] update_config: prompt owned by server (no client prompt)")
+            // `initiate.prompt` is sent. Summary: `logOutboundAIUCv1HelloSummary` (single line).
         } else if helloScene == .outboundChat {
             if let prompt = loadPromptIfNeeded(for: helloScene) {
                 initiate["prompt"] = prompt
@@ -811,7 +816,6 @@ class WebSocketService: NSObject, ObservableObject {
         if !templateVars.isEmpty {
             initiate["template_vars"] = templateVars
         }
-        
 
         // tts_voice for TTS（AI分身、AI配置向导、evaluation 不传 tts_voice）
         let skipTtsVoice = helloScene == .outboundChat || helloScene == .initConfig || helloScene == .updateConfig || helloScene == .evaluation
@@ -840,9 +844,17 @@ class WebSocketService: NSObject, ObservableObject {
             hello["initiate"] = initiate
         }
 
+        if helloScene == .updateConfig {
+            logOutboundAIUCv1HelloSummary(initiate: initiate)
+        }
+
         if let data = try? JSONSerialization.data(withJSONObject: hello, options: [.prettyPrinted, .sortedKeys]),
            let payload = String(data: data, encoding: .utf8) {
-            print("[WS] hello payload:\n\(payload)")
+            if helloScene == .updateConfig {
+                print("[WS] hello_sent scene=update_config json_bytes=\(data.count) wire_json_omitted=1 pair_with_prior_UCv1_line=1")
+            } else {
+                print("[WS] hello payload:\n\(payload)")
+            }
         } else {
             print("[WS] hello payload serialization failed")
         }
@@ -916,6 +928,9 @@ class WebSocketService: NSObject, ObservableObject {
     /// 发送工具调用响应
     @MainActor
     func sendToolResponse(callId: String, result: [String: Any]? = nil, error: String? = nil) {
+        if helloScene == .updateConfig {
+            print("\(Self.outboundAIUCv1Tag) tool_response side=client scene=\(helloScene.rawValue) call_id=\(callId) \(Self.outboundAIUCv1ToolResponseSummary(result: result, error: error))")
+        }
         var payload: [String: Any] = [
             "type": "tool_response",
             "call_id": callId
@@ -927,6 +942,55 @@ class WebSocketService: NSObject, ObservableObject {
             payload["error"] = error
         }
         sendJSON(payload)
+    }
+
+    /// `update_config` hello 摘要：不含 prompt 全文，仅键与条数，供云端区分「客户端未发旧 prompt / manifest 已带上」。
+    @MainActor
+    private func logOutboundAIUCv1HelloSummary(initiate: [String: Any]) {
+        let hasClientPrompt = initiate["prompt"] != nil
+        guard let tv = initiate["template_vars"] as? [String: Any] else {
+            print("\(Self.outboundAIUCv1Tag) hello side=client scene=update_config client_prompt=\(hasClientPrompt) note=server_owned_prompt template_vars=missing")
+            return
+        }
+        let smCount: Int = {
+            if let sm = tv["strategyManifest"] as? [[String: Any]] { return sm.count }
+            if let sm = tv["strategyManifest"] as? [Any] { return sm.count }
+            return 0
+        }()
+        let tmCount: Int = {
+            if let tm = tv["templateManifest"] as? [[String: Any]] { return tm.count }
+            if let tm = tv["templateManifest"] as? [Any] { return tm.count }
+            return 0
+        }()
+        let keys = tv.keys.sorted().joined(separator: ",")
+        let hasProcessStrategy = tv["processStrategy"] != nil
+        let msgCount = (initiate["messages"] as? [Any])?.count ?? 0
+        print("\(Self.outboundAIUCv1Tag) hello side=client scene=update_config client_prompt=\(hasClientPrompt) note=server_owned_prompt initiate_messages_count=\(msgCount) strategyManifest_count=\(smCount) templateManifest_count=\(tmCount) template_var_keys=\(keys) processStrategy_in_template_vars=\(hasProcessStrategy)")
+    }
+
+    /// 单行摘要：不打印 `load_template` 等大字段，避免日志爆炸。
+    private static func outboundAIUCv1ToolResponseSummary(result: [String: Any]?, error: String?) -> String {
+        if let error {
+            let trimmed = error.trimmingCharacters(in: .whitespacesAndNewlines)
+            let preview = trimmed.count > 120 ? String(trimmed.prefix(120)) + "…(len=\(trimmed.count))" : trimmed
+            return "kind=error msg=\"\(preview)\""
+        }
+        guard let result else {
+            return "kind=empty"
+        }
+        let keys = result.keys.sorted().joined(separator: ",")
+        var bits = ["kind=result", "keys=\(keys)"]
+        if let b = result["success"] as? Bool { bits.append("success=\(b)") }
+        if let s = result["action"] as? String { bits.append("action=\(s)") }
+        if let s = result["reason"] as? String {
+            let p = s.count > 80 ? String(s.prefix(80)) + "…" : s
+            bits.append("reason=\(p)")
+        }
+        if let s = result["name"] as? String { bits.append("name_len=\(s.count)") }
+        if let s = result["scheduled_at"] as? String { bits.append("scheduled_at=\(s)") }
+        if result["content"] != nil { bits.append("has_content_blob=true") }
+        if result["tag"] != nil { bits.append("has_tag=true") }
+        return bits.joined(separator: " ")
     }
     
     // MARK: - 内部方法
@@ -1271,6 +1335,11 @@ class WebSocketService: NSObject, ObservableObject {
     @MainActor
     private func handleServerErrorMessage(_ message: String, rawJSON: String) {
         print("[WS] 错误(message): \(message) raw_len=\(rawJSON.count)")
+        if helloScene == .updateConfig {
+            let m = message.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "'")
+            let preview = m.count > 200 ? String(m.prefix(200)) + "…(len=\(m.count))" : m
+            print("\(Self.outboundAIUCv1Tag) server_error side=server scene=\(helloScene.rawValue) msg=\"\(preview)\" raw_len=\(rawJSON.count) note=client_will_disconnect")
+        }
         notifyDelegates { $0.webSocketDidReceiveError(message: message) }
 
         // Must run while still connected: after `hello`, `isConnected` is true. The old
@@ -1291,6 +1360,10 @@ class WebSocketService: NSObject, ObservableObject {
     @MainActor
     private func handleToolCallMessage(_ payload: ToolCallPayload, source: String) {
         print("[WS] \(source) dispatch name=\(payload.name) callId=\(payload.callId) rawArgsType=\(payload.rawArgumentsType) parsedArgKeys=\(Array(payload.arguments.keys))")
+        if helloScene == .updateConfig {
+            let keys = Array(payload.arguments.keys).sorted().joined(separator: ",")
+            print("\(Self.outboundAIUCv1Tag) tool_call_rx side=client scene=\(helloScene.rawValue) name=\(payload.name) call_id=\(payload.callId) arg_keys=\(keys)")
+        }
         notifyDelegates {
             $0.webSocketDidReceiveToolCall(
                 callId: payload.callId,
