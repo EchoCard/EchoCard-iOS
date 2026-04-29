@@ -522,21 +522,22 @@ struct FeedbackChatModalView: View {
             guard !shownProposalIds.contains("tpl_\(req.id)") else { return }
             shownProposalIds.insert("tpl_\(req.id)")
             print("[OutboundAI][UI] pendingCreateTemplate observed callId=\(req.id) name=\(req.name) contentLen=\(req.content.count) hasHandler=\(onCreateTemplate != nil)")
-            if let handler = onCreateTemplate {
-                handler(req.name, req.content) { success in
-                    print("[OutboundAI][UI] create_template handler completed callId=\(req.id) success=\(success)")
-                    controller.ws.sendToolResponse(
-                        callId: req.id,
-                        result: success ? ["success": true, "message": "模板\"\(req.name)\"已保存"] : nil,
-                        error: success ? nil : "模板创建失败"
-                    )
-                    controller.pendingCreateTemplate = nil
-                }
+            // v1 §3.5: silent overwrite via OutboundTemplateStore — succeeds regardless
+            // of whether the host view supplied an `onCreateTemplate` callback (the
+            // callback is now a side-effect hook, e.g. AISecView's identity-default
+            // sniffing). Response payload follows spec: `{ success, name, updated_at }`.
+            let saveResult = OutboundTemplateStore.save(name: req.name, content: req.content)
+            if saveResult.success {
+                onCreateTemplate?(req.name, req.content) { _ in /* legacy ack ignored */ }
+                controller.ws.sendToolResponse(callId: req.id, result: [
+                    "success": true,
+                    "name": req.name,
+                    "updated_at": saveResult.updatedAt
+                ])
             } else {
-                print("[OutboundAI][UI] create_template not supported in this view, callId=\(req.id)")
-                controller.ws.sendToolResponse(callId: req.id, result: nil, error: "不支持创建模板")
-                controller.pendingCreateTemplate = nil
+                controller.ws.sendToolResponse(callId: req.id, result: nil, error: "模板创建失败")
             }
+            controller.pendingCreateTemplate = nil
             }
             .onChange(of: controller.pendingInitiateCall?.id) { _, _ in
             guard let req = controller.pendingInitiateCall else { return }
@@ -552,12 +553,29 @@ struct FeedbackChatModalView: View {
                         templateName: req.templateName,
                         scheduledAt: nil,
                         timeDescription: nil,
-                        respond: { confirmed, rejectionReason in
-                            self.controller.ws.sendToolResponse(
-                                callId: req.id,
-                                result: confirmed ? ["success": true, "message": "用户已确认，正在拨出电话"] : nil,
-                                error: confirmed ? nil : (rejectionReason ?? "用户取消了拨出")
-                            )
+                        respond: { confirmed, rejectionReason, wasUserCancel in
+                            // v1 §3.6:
+                            //   confirm OK   → result {success:true, action:"dialing"}
+                            //   user cancel  → result {success:false, action:"cancelled", reason:"user_cancelled"}
+                            //   host failure → error text
+                            if confirmed {
+                                self.controller.ws.sendToolResponse(callId: req.id, result: [
+                                    "success": true,
+                                    "action": "dialing"
+                                ])
+                            } else if wasUserCancel {
+                                self.controller.ws.sendToolResponse(callId: req.id, result: [
+                                    "success": false,
+                                    "action": "cancelled",
+                                    "reason": "user_cancelled"
+                                ])
+                            } else {
+                                self.controller.ws.sendToolResponse(
+                                    callId: req.id,
+                                    result: nil,
+                                    error: rejectionReason ?? "外呼失败"
+                                )
+                            }
                             self.controller.pendingInitiateCall = nil
                         }
                     )
@@ -572,18 +590,38 @@ struct FeedbackChatModalView: View {
                 controller.ws.sendToolResponse(callId: req.id, result: nil, error: "不支持定时外呼")
                 controller.pendingScheduleCall = nil
             } else {
+                let scheduledAt = req.scheduledAt
                 appendOutboundConfirmationMessage(
                     OutboundCallConfirmRequest(
                         phone: req.phone,
                         templateName: req.templateName,
-                        scheduledAt: req.scheduledAt,
+                        scheduledAt: scheduledAt,
                         timeDescription: req.timeDescription,
-                        respond: { confirmed, rejectionReason in
-                            self.controller.ws.sendToolResponse(
-                                callId: req.id,
-                                result: confirmed ? ["success": true, "message": "已安排定时外呼：\(req.timeDescription)"] : nil,
-                                error: confirmed ? nil : (rejectionReason ?? "用户取消了定时外呼")
-                            )
+                        respond: { confirmed, rejectionReason, wasUserCancel in
+                            // v1 §3.7:
+                            //   confirm OK   → result {success:true, scheduled_at:<ISO>}
+                            //   user cancel  → result {success:false, action:"cancelled", reason:"user_cancelled"}
+                            //   host failure → error text
+                            if confirmed {
+                                let formatter = ISO8601DateFormatter()
+                                formatter.formatOptions = [.withInternetDateTime]
+                                self.controller.ws.sendToolResponse(callId: req.id, result: [
+                                    "success": true,
+                                    "scheduled_at": formatter.string(from: scheduledAt)
+                                ])
+                            } else if wasUserCancel {
+                                self.controller.ws.sendToolResponse(callId: req.id, result: [
+                                    "success": false,
+                                    "action": "cancelled",
+                                    "reason": "user_cancelled"
+                                ])
+                            } else {
+                                self.controller.ws.sendToolResponse(
+                                    callId: req.id,
+                                    result: nil,
+                                    error: rejectionReason ?? "定时外呼失败"
+                                )
+                            }
                             self.controller.pendingScheduleCall = nil
                         }
                     )
@@ -1294,7 +1332,7 @@ struct FeedbackChatModalView: View {
                     confirmed: confirmed,
                     rejectionReason: rejectionReason
                 )
-                request.respond(confirmed, rejectionReason)
+                request.respond(confirmed, rejectionReason, false)
             }
         } else {
             onInitiateCall?(request.phone, request.templateName) { confirmed, rejectionReason in
@@ -1303,7 +1341,7 @@ struct FeedbackChatModalView: View {
                     confirmed: confirmed,
                     rejectionReason: rejectionReason
                 )
-                request.respond(confirmed, rejectionReason)
+                request.respond(confirmed, rejectionReason, false)
             }
         }
         pendingOutboundConfirmations[msgId] = nil
@@ -1314,7 +1352,7 @@ struct FeedbackChatModalView: View {
         if let index = messages.firstIndex(where: { $0.id == msgId }) {
             messages[index].proposalStatus = .cancelled
         }
-        request.respond(false, language == .zh ? "用户取消了拨出" : "User cancelled")
+        request.respond(false, language == .zh ? "用户取消了拨出" : "User cancelled", true)
         pendingOutboundConfirmations[msgId] = nil
     }
 

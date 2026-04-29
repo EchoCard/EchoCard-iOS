@@ -232,17 +232,14 @@ class WebSocketService: NSObject, ObservableObject {
     private let wsURL = URL(string: AppConfig.wsBaseURL)!
     private let protocolVersion = "1"
     private let sendPromptEnabledKey = "ws_send_prompt_enabled"
-    private let avatarSendPromptEnabledKey = "ws_avatar_send_prompt_enabled"
     /// 开关：scene=init_config 时是否在 hello 中发送 init_config 调试 prompt。默认开。
     private let initConfigSendPromptEnabledKey = "ws_init_config_send_prompt_enabled"
     private let voiceIdKey = "callmate.voiceId"
     private let callScenePromptResourceName = "daijie"
     private let initConfigPromptResourceName = "init_config"
     private let initAndEvaluationPromptResourceName = "config"
-    private let updateConfigPromptResourceName = "avatar_update_config"
     private let promptResourceExtension = "txt"
     private let promptSubdirectory = "Prompts"
-    private let runtimeSubdirectory = "Prompts/runtime"
     private let callEndMarkerToken = "✿END✿"
     /// 过早输出 ✿END✿ 会触发 `webSocketDidReceiveAIHangup()`。旧提示「判断要挂断就加」易误触发；须限定为真正终局回合。
     private let callEndMarkerInstruction = "【✿END✿】仅当本轮之后不应再由你开口、且通话可以结束时，才在本轮回复末尾追加 ✿END✿（例：对方已挂断；对方明确要求结束且你无需再补充；任务已完全达成且只剩简短道别）。不要在开场寒暄、信息未问全、尚在协商或追问、等待对方回应、多轮任务中途追加 ✿END✿。"
@@ -634,25 +631,6 @@ class WebSocketService: NSObject, ObservableObject {
         return defaults.bool(forKey: sendPromptEnabledKey)
     }
 
-    /// Toggle whether AI avatar (`update_config`) sends `hello.initiate.prompt`.
-    /// Default is `false` when not set.
-    @MainActor
-    func setAvatarSendPromptEnabled(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: avatarSendPromptEnabledKey)
-        print("[WS] setAvatarSendPromptEnabled=\(enabled)")
-    }
-
-    /// Returns whether AI avatar (`update_config`) sends `hello.initiate.prompt`.
-    /// Default is `false` when not set.
-    @MainActor
-    func isAvatarSendPromptEnabled() -> Bool {
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: avatarSendPromptEnabledKey) == nil {
-            return false
-        }
-        return defaults.bool(forKey: avatarSendPromptEnabledKey)
-    }
-
     /// 开关：scene=init_config 时是否在 hello 中发送 init_config prompt。默认开。
     @MainActor
     func setInitConfigSendPromptEnabled(_ enabled: Bool) {
@@ -748,13 +726,10 @@ class WebSocketService: NSObject, ObservableObject {
                 initiate["apns_request_id"] = rid
             }
         } else if helloScene == .updateConfig {
-            // AI avatar update-config scene can be toggled by dedicated switch.
-            let avatarSendPromptEnabled = isAvatarSendPromptEnabled()
-            if avatarSendPromptEnabled, let prompt = loadPromptIfNeeded(for: helloScene) {
-                initiate["prompt"] = prompt
-            } else if !avatarSendPromptEnabled {
-                print("[WS] avatar prompt sending disabled by flag")
-            }
+            // v1 (update_config client spec, 2026-04-28): prompt is fully owned
+            // by the server. Client only injects template_vars below — no
+            // `initiate.prompt` is sent.
+            print("[WS] update_config: prompt owned by server (no client prompt)")
         } else if helloScene == .outboundChat {
             if let prompt = loadPromptIfNeeded(for: helloScene) {
                 initiate["prompt"] = prompt
@@ -790,10 +765,30 @@ class WebSocketService: NSObject, ObservableObject {
             templateVars["appellation"] = appellation
         }
 
-
-        let processStrategy = ProcessStrategyStore.processStrategyJSONString()
-        if let processStrategy, !processStrategy.isEmpty {
-            templateVars["processStrategy"] = processStrategy
+        if helloScene == .updateConfig {
+            // v1 §2 update_config template_vars:
+            //   - greeting (optional)
+            //   - strategyManifest (omit when user has no rules)
+            //   - templateManifest (presence is the gate that unlocks template/outbound skills)
+            // The legacy `processStrategy` (full JSON) is **not** sent for this scene.
+            if let greeting = UserDefaults.standard.string(forKey: "callmate.userGreeting"),
+               !greeting.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                templateVars["greeting"] = greeting
+            }
+            let strategyManifest = ProcessStrategyStore.getStrategyManifest()
+            if !strategyManifest.isEmpty {
+                templateVars["strategyManifest"] = strategyManifest
+            }
+            // Outbound capability is currently universal in this build — always
+            // send `templateManifest` (possibly empty) to unlock the LLM's
+            // template/outbound skills. If a future build introduces a gate,
+            // wrap this with the relevant flag and omit the field when off.
+            templateVars["templateManifest"] = OutboundTemplateStore.getManifest()
+        } else {
+            let processStrategy = ProcessStrategyStore.processStrategyJSONString()
+            if let processStrategy, !processStrategy.isEmpty {
+                templateVars["processStrategy"] = processStrategy
+            }
         }
 
         if helloScene == .evaluation,
@@ -1356,7 +1351,8 @@ class WebSocketService: NSObject, ObservableObject {
         case .evaluation:
             return initAndEvaluationPromptResourceName
         case .updateConfig:
-            return updateConfigPromptResourceName
+            // v1: server owns the update_config prompt; we never load locally.
+            return nil
         case .outboundChat:
             return "outbound_call"
         }
@@ -1399,11 +1395,6 @@ class WebSocketService: NSObject, ObservableObject {
             return cached
         }
 
-        if scene == .updateConfig, let compiled = loadModularPrompt() {
-            cachedPromptsByResourceName[resourceName] = compiled
-            return compiled
-        }
-
         let bundle = Bundle.main
         let url = bundle.url(
             forResource: resourceName,
@@ -1434,76 +1425,6 @@ class WebSocketService: NSObject, ObservableObject {
         }
         cachedPromptsByResourceName[resourceName] = prompt
         return prompt
-    }
-
-    /// Loads all `.txt` files from `Prompts/runtime/`, sorts by filename, and concatenates them.
-    /// Returns nil if no modules are found, falling back to the monolithic file.
-    @MainActor
-    private func loadModularPrompt() -> String? {
-        let bundle = Bundle.main
-        guard let runtimeURL = bundle.url(
-            forResource: "runtime",
-            withExtension: nil,
-            subdirectory: promptSubdirectory
-        ) else {
-            let allPaths = bundle.paths(forResourcesOfType: promptResourceExtension, inDirectory: runtimeSubdirectory)
-            if allPaths.isEmpty {
-                print("[WS] runtime directory not found, falling back to monolithic prompt")
-                return nil
-            }
-            let sorted = allPaths.sorted { URL(fileURLWithPath: $0).lastPathComponent < URL(fileURLWithPath: $1).lastPathComponent }
-            var modules: [String] = []
-            for path in sorted {
-                if let content = try? String(contentsOfFile: path, encoding: .utf8) {
-                    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        modules.append(trimmed)
-                        print("[WS] loaded runtime module: \(URL(fileURLWithPath: path).lastPathComponent) (\(trimmed.count) chars)")
-                    }
-                }
-            }
-            guard !modules.isEmpty else { return nil }
-            let compiled = modules.joined(separator: "\n\n")
-            print("[WS] compiled \(modules.count) runtime modules, total \(compiled.count) chars")
-            return compiled
-        }
-
-        do {
-            let fileURLs = try FileManager.default.contentsOfDirectory(
-                at: runtimeURL,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ).filter { $0.pathExtension == promptResourceExtension }
-             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-
-            guard !fileURLs.isEmpty else {
-                print("[WS] runtime directory empty, falling back to monolithic prompt")
-                return nil
-            }
-
-            var modules: [String] = []
-            for url in fileURLs {
-                if let content = try? String(contentsOf: url, encoding: .utf8) {
-                    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        modules.append(trimmed)
-                        print("[WS] loaded runtime module: \(url.lastPathComponent) (\(trimmed.count) chars)")
-                    }
-                }
-            }
-
-            guard !modules.isEmpty else {
-                print("[WS] no valid runtime modules found, falling back to monolithic prompt")
-                return nil
-            }
-
-            let compiled = modules.joined(separator: "\n\n")
-            print("[WS] compiled \(modules.count) runtime modules, total \(compiled.count) chars")
-            return compiled
-        } catch {
-            print("[WS] failed to enumerate runtime directory: \(error)")
-            return nil
-        }
     }
 
     @MainActor

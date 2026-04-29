@@ -522,22 +522,68 @@ extension CallSessionController: WebSocketServiceDelegate {
         }
         if name == "save_user_appellation" {
             print("[Tool] save_user_appellation called, arguments=\(arguments)")
-            if let appellation = arguments["appellation"] as? String,
-               !appellation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                UserDefaults.standard.set(appellation, forKey: "callmate.userAppellation")
-                print("[Tool] save_user_appellation saved appellation=\(appellation)")
-            } else {
-                print("[Tool] save_user_appellation skipped: appellation missing or empty")
+            let raw = (arguments["appellation"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if raw.isEmpty {
+                ws.sendToolResponse(callId: callId, result: nil, error: "称呼为空")
+                print("[Tool] save_user_appellation rejected: empty")
+                return
             }
+            UserDefaults.standard.set(raw, forKey: "callmate.userAppellation")
             ws.sendToolResponse(callId: callId, result: ["success": true])
             print("[Tool] save_user_appellation responded success, callId=\(callId)")
             return
         }
+        if name == "load_rules" {
+            let tag = (arguments["tag"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !tag.isEmpty else {
+                ws.sendToolResponse(callId: callId, result: nil, error: "缺少 tag")
+                return
+            }
+            guard let rule = ProcessStrategyStore.getRule(tag: tag) else {
+                ws.sendToolResponse(callId: callId, result: nil, error: "规则不存在: \(tag)")
+                return
+            }
+            ws.sendToolResponse(callId: callId, result: [
+                "tag": tag,
+                "name": rule.name,
+                "content": rule.content
+            ])
+            print("[Tool] load_rules tag=\(tag) name=\(rule.name) contentLen=\(rule.content.count)")
+            return
+        }
+        if name == "load_template" {
+            let target = (arguments["name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !target.isEmpty else {
+                ws.sendToolResponse(callId: callId, result: nil, error: "缺少 name")
+                return
+            }
+            switch OutboundTemplateStore.lookup(name: target) {
+            case .hit(let n, let taskType, let content):
+                ws.sendToolResponse(callId: callId, result: [
+                    "name": n,
+                    "task_type": taskType,
+                    "content": content
+                ])
+                print("[Tool] load_template name=\(n) taskType=\(taskType) contentLen=\(content.count)")
+            case .ambiguous(let matches):
+                let list = matches.joined(separator: "、")
+                ws.sendToolResponse(callId: callId, result: nil, error: "找到多个匹配模板：\(list)")
+                print("[Tool] load_template ambiguous target=\(target) matches=\(matches)")
+            case .miss:
+                ws.sendToolResponse(callId: callId, result: nil, error: "未找到模板「\(target)」")
+                print("[Tool] load_template miss target=\(target)")
+            }
+            return
+        }
         if name == "create_template" {
-            guard let templateName = arguments["name"] as? String,
-                  let templateContent = arguments["content"] as? String,
-                  !templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !templateContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let templateName = (arguments["name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let templateContent = (arguments["content"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !templateName.isEmpty, !templateContent.isEmpty else {
                 print("[Tool] create_template missing or empty fields, callId=\(callId) args=\(arguments)")
                 ws.sendToolResponse(callId: callId, result: nil, error: "模板名称或内容不能为空")
                 return
@@ -548,18 +594,32 @@ extension CallSessionController: WebSocketServiceDelegate {
             return
         }
         if name == "initiate_call" {
-            guard let phone = arguments["phone"] as? String,
-                  let templateName = arguments["template_name"] as? String,
-                  !phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let phone = (arguments["phone"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let templateName = (arguments["template_name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !phone.isEmpty, !templateName.isEmpty else {
                 print("[Tool] initiate_call missing fields, callId=\(callId)")
                 ws.sendToolResponse(callId: callId, result: nil, error: "电话号码或模板名称不能为空")
                 return
             }
-            let cleanPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleanTemplateName = templateName.trimmingCharacters(in: .whitespacesAndNewlines)
-            print("[Tool] initiate_call phone=\(cleanPhone) template=\(cleanTemplateName)")
-            pendingInitiateCall = OutboundCallRequest(id: callId, phone: cleanPhone, templateName: cleanTemplateName)
+            if pendingInitiateCall != nil || pendingScheduleCall != nil {
+                ws.sendToolResponse(callId: callId, result: nil, error: "已有一通外呼待确认，请先处理")
+                print("[Tool] initiate_call rejected: pending outbound exists")
+                return
+            }
+            if !isValidPhoneFormat(phone) {
+                ws.sendToolResponse(callId: callId, result: nil, error: "号码格式不正确：\(phone)")
+                print("[Tool] initiate_call rejected: invalid phone=\(phone)")
+                return
+            }
+            if let templateErr = outboundTemplatePrecheckError(name: templateName) {
+                ws.sendToolResponse(callId: callId, result: nil, error: templateErr)
+                print("[Tool] initiate_call rejected: template=\(templateName) err=\(templateErr)")
+                return
+            }
+            print("[Tool] initiate_call phone=\(phone) template=\(templateName)")
+            pendingInitiateCall = OutboundCallRequest(id: callId, phone: phone, templateName: templateName)
             return
         }
         if name == "display_guide_image" {
@@ -593,37 +653,41 @@ extension CallSessionController: WebSocketServiceDelegate {
             return
         }
         if name == "schedule_call" {
-            guard let phone = arguments["phone"] as? String,
-                  let templateName = arguments["template_name"] as? String,
-                  !phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let phone = (arguments["phone"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let templateName = (arguments["template_name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !phone.isEmpty, !templateName.isEmpty else {
                 print("[Tool] schedule_call missing fields, callId=\(callId)")
                 ws.sendToolResponse(callId: callId, result: nil, error: "电话号码或模板名称不能为空")
                 return
             }
-            let cleanPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleanTemplateName = templateName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if pendingInitiateCall != nil || pendingScheduleCall != nil {
+                ws.sendToolResponse(callId: callId, result: nil, error: "已有一通外呼待确认，请先处理")
+                print("[Tool] schedule_call rejected: pending outbound exists")
+                return
+            }
+            if !isValidPhoneFormat(phone) {
+                ws.sendToolResponse(callId: callId, result: nil, error: "号码格式不正确：\(phone)")
+                print("[Tool] schedule_call rejected: invalid phone=\(phone)")
+                return
+            }
+            if let templateErr = outboundTemplatePrecheckError(name: templateName) {
+                ws.sendToolResponse(callId: callId, result: nil, error: templateErr)
+                print("[Tool] schedule_call rejected: template=\(templateName) err=\(templateErr)")
+                return
+            }
             let timeDescription = (arguments["time_description"] as? String) ?? ""
             // Resolve scheduled time from absolute ISO string or relative minutes_from_now
             let scheduledAt: Date
-            if let isoString = arguments["scheduled_time"] as? String,
-               !isoString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
-                if let parsed = formatter.date(from: isoString) {
+            if let isoString = (arguments["scheduled_time"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !isoString.isEmpty {
+                if let parsed = parseISODate(isoString) {
                     scheduledAt = parsed
                 } else {
-                    // Try without timezone
-                    let fallbackFormatter = DateFormatter()
-                    fallbackFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-                    fallbackFormatter.locale = Locale(identifier: "en_US_POSIX")
-                    if let parsed = fallbackFormatter.date(from: isoString) {
-                        scheduledAt = parsed
-                    } else {
-                        print("[Tool] schedule_call invalid scheduled_time=\(isoString)")
-                        ws.sendToolResponse(callId: callId, result: nil, error: "时间格式解析失败，请使用 ISO 8601 格式")
-                        return
-                    }
+                    print("[Tool] schedule_call invalid scheduled_time=\(isoString)")
+                    ws.sendToolResponse(callId: callId, result: nil, error: "时间格式无法识别：\(isoString)")
+                    return
                 }
             } else if let minutes = arguments["minutes_from_now"] as? Int, minutes > 0 {
                 scheduledAt = Date().addingTimeInterval(Double(minutes) * 60.0)
@@ -632,17 +696,28 @@ extension CallSessionController: WebSocketServiceDelegate {
                 ws.sendToolResponse(callId: callId, result: nil, error: "请提供 scheduled_time 或 minutes_from_now")
                 return
             }
-            // Reject times in the past
+            // Reject times in the past (allow 30s slack)
             guard scheduledAt > Date().addingTimeInterval(-30) else {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime]
+                ws.sendToolResponse(
+                    callId: callId,
+                    result: nil,
+                    error: "时间已过：\(formatter.string(from: scheduledAt))"
+                )
                 print("[Tool] schedule_call time is in the past: \(scheduledAt)")
-                ws.sendToolResponse(callId: callId, result: nil, error: "预定时间已过，请重新指定")
                 return
             }
-            print("[Tool] schedule_call phone=\(cleanPhone) template=\(cleanTemplateName) scheduledAt=\(scheduledAt) desc=\(timeDescription)")
+            if let conflict = findScheduleConflict(scheduledAt: scheduledAt) {
+                ws.sendToolResponse(callId: callId, result: nil, error: conflict)
+                print("[Tool] schedule_call rejected: conflict=\(conflict)")
+                return
+            }
+            print("[Tool] schedule_call phone=\(phone) template=\(templateName) scheduledAt=\(scheduledAt) desc=\(timeDescription)")
             pendingScheduleCall = OutboundScheduleCallRequest(
                 id: callId,
-                phone: cleanPhone,
-                templateName: cleanTemplateName,
+                phone: phone,
+                templateName: templateName,
                 scheduledAt: scheduledAt,
                 timeDescription: timeDescription
             )
@@ -657,6 +732,7 @@ extension CallSessionController: WebSocketServiceDelegate {
               let updatedRuleSummary = arguments["updated_rule_summary"] as? String,
               let updatedRulesRaw = arguments["updated_rules"] as? [[String: Any]] else {
             print("[WS] display_rule_change missing fields")
+            ws.sendToolResponse(callId: callId, result: nil, error: "规则变更参数不完整")
             return
         }
         let updatedRules: [RuleChangeItem] = updatedRulesRaw.compactMap { item in
@@ -674,6 +750,69 @@ extension CallSessionController: WebSocketServiceDelegate {
             updatedRuleSummary: updatedRuleSummary,
             updatedRules: updatedRules
         )
+    }
+
+    // MARK: - update_config tool helpers (v1)
+
+    /// Lightweight phone-format gate: ≥5 digits, only `+` / `-` / spaces / digits.
+    /// Spec §3.6 requires a human-readable error like "号码格式不正确：1234".
+    func isValidPhoneFormat(_ phone: String) -> Bool {
+        let trimmed = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let allowed = CharacterSet(charactersIn: "0123456789+-() ")
+        if trimmed.unicodeScalars.contains(where: { !allowed.contains($0) }) {
+            return false
+        }
+        let digitsOnly = trimmed.unicodeScalars.filter { CharacterSet.decimalDigits.contains($0) }
+        return digitsOnly.count >= 5
+    }
+
+    /// Spec §3.6/§3.7: pre-validate template before popping a card — same resolution
+    /// as `load_template`, but **ambiguous** names must not proceed (error to server).
+    /// - Returns: `nil` if exactly one template matches; otherwise a human-readable `error` string.
+    func outboundTemplatePrecheckError(name: String) -> String? {
+        switch OutboundTemplateStore.lookup(name: name) {
+        case .hit:
+            return nil
+        case .ambiguous(let matches):
+            let list = matches.joined(separator: "、")
+            return "找到多个匹配模板：\(list)"
+        case .miss:
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "未找到模板「\(trimmed)」"
+        }
+    }
+
+    /// ISO 8601 with or without timezone — both accepted.
+    func parseISODate(_ isoString: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
+        if let parsed = formatter.date(from: isoString) {
+            return parsed
+        }
+        let fallback = DateFormatter()
+        fallback.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        fallback.locale = Locale(identifier: "en_US_POSIX")
+        return fallback.date(from: isoString)
+    }
+
+    /// Spec §3.7: detect a ±5min window collision with an existing scheduled task.
+    /// Returns the human-readable error text, or nil when no conflict.
+    func findScheduleConflict(scheduledAt: Date) -> String? {
+        let conflictWindow: TimeInterval = 5 * 60
+        let tasks = OutboundTaskStore.load()
+        for task in tasks where task.status == .scheduled {
+            guard let existing = task.scheduledAt else { continue }
+            if abs(existing.timeIntervalSince(scheduledAt)) <= conflictWindow {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "zh_CN")
+                formatter.dateFormat = "HH:mm"
+                let lower = existing.addingTimeInterval(-conflictWindow)
+                let upper = existing.addingTimeInterval(conflictWindow)
+                return "与已有定时任务「\(task.promptType)」冲突（\(formatter.string(from: lower)) - \(formatter.string(from: upper))）"
+            }
+        }
+        return nil
     }
 
     // MARK: - TTS Uplink Drain

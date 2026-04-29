@@ -191,21 +191,29 @@ extension CallSessionController {
         print("[CallSession] manual listen cancel (ui/local only, no ws command)")
     }
 
+    /// v1 §3.3 `display_rule_change` response.
+    /// `confirm` → `{ success: true, operation: "confirm" }`
+    /// `cancel`  → `{ success: false, action: "cancelled", reason: "user_cancelled", operation: "cancel" }`
     func sendToolResponse(callId: String, operation: String) {
-        let message = operation == "confirm"
-            ? (language == .zh ? "确认修改" : "Confirm")
-            : (language == .zh ? "取消修改" : "Cancel")
-        if operation == "confirm", let change = pendingRuleChange {
-            let updates = change.updatedRules.map {
-                ProcessStrategyChange(type: $0.type, rule: $0.rule, action: $0.action)
+        if operation == "confirm" {
+            if let change = pendingRuleChange {
+                let updates = change.updatedRules.map {
+                    ProcessStrategyChange(type: $0.type, rule: $0.rule, action: $0.action)
+                }
+                ProcessStrategyStore.applyChanges(updates)
             }
-            ProcessStrategyStore.applyChanges(updates)
+            ws.sendToolResponse(callId: callId, result: [
+                "success": true,
+                "operation": "confirm"
+            ])
+        } else {
+            ws.sendToolResponse(callId: callId, result: [
+                "success": false,
+                "action": "cancelled",
+                "reason": "user_cancelled",
+                "operation": "cancel"
+            ])
         }
-        ws.sendToolResponse(callId: callId, result: [
-            "success": true,
-            "operation": operation,
-            "message": message
-        ])
     }
 
     /// UI 关闭引导图/视频后调用，避免重复弹窗。

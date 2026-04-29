@@ -1175,7 +1175,10 @@ struct OutboundCallConfirmRequest: Identifiable {
     let scheduledAt: Date?
     /// Human-readable time label from AI (e.g. "今天下午 3:30")
     let timeDescription: String?
-    let respond: (Bool, String?) -> Void
+    /// Outcome callback. `wasUserCancel` distinguishes the user-pressed-cancel
+    /// path (→ v1 `result.success=false, reason=user_cancelled`) from a
+    /// system/host failure (→ `error: <reasonText>`).
+    let respond: (_ confirmed: Bool, _ reasonText: String?, _ wasUserCancel: Bool) -> Void
 }
 
 // MARK: - OutboundCreateTaskAIView
@@ -1286,7 +1289,7 @@ struct OutboundCreateTaskAIView: View {
                             templateName: templateName,
                             scheduledAt: nil,
                             timeDescription: nil,
-                            respond: respond
+                            respond: { confirmed, reasonText, _ in respond(confirmed, reasonText) }
                         )
                     },
                     onScheduleCall: { phone, templateName, scheduledAt, timeDescription, respond in
@@ -1295,7 +1298,7 @@ struct OutboundCreateTaskAIView: View {
                             templateName: templateName,
                             scheduledAt: scheduledAt,
                             timeDescription: timeDescription,
-                            respond: respond
+                            respond: { confirmed, reasonText, _ in respond(confirmed, reasonText) }
                         )
                     }
                 )
@@ -1318,11 +1321,12 @@ struct OutboundCreateTaskAIView: View {
                             print("[OutboundAI] call confirm failed: template not found locally, name=\(confirm.templateName)")
                             confirm.respond(
                                 false,
-                                "未找到本地模板：\(confirm.templateName)。请先创建模板，再发起外呼。"
+                                "未找到本地模板：\(confirm.templateName)。请先创建模板，再发起外呼。",
+                                false
                             )
                             return
                         }
-                        confirm.respond(true, nil)
+                        confirm.respond(true, nil, false)
                         onCallConfirmed(
                             confirm.phone,
                             confirm.templateName,
@@ -1332,7 +1336,7 @@ struct OutboundCreateTaskAIView: View {
                     },
                     onCancel: {
                         pendingCallConfirm = nil
-                        confirm.respond(false, nil)
+                        confirm.respond(false, nil, true)
                     }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))

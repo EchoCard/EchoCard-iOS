@@ -261,11 +261,6 @@ struct AISecView: View {
                 showSimulationView = false
             }
         }
-        .task {
-            await MainActor.run {
-                WebSocketService.shared.setAvatarSendPromptEnabled(true)
-            }
-        }
         .onChange(of: queueService.outboundDialBlockedMessage) { _, msg in
             guard let msg, !msg.isEmpty else { return }
             let now = Date()

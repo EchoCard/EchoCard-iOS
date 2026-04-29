@@ -86,6 +86,77 @@ enum ProcessStrategyStore {
         return true
     }
     
+    /// v1 update_config: returns the strategy manifest used to populate
+    /// `template_vars.strategyManifest` in the hello payload, and the
+    /// directory the LLM uses to decide whether to call `load_rules`.
+    /// Returns an empty array if the user has no rules; callers should
+    /// **not** include the field in hello when empty (per spec §2).
+    static func getStrategyManifest() -> [[String: String]] {
+        let rules = loadRules()
+        return rules.map { rule in
+            return [
+                "id": manifestId(for: rule),
+                "name": rule.type,
+                "description": manifestDescription(for: rule)
+            ]
+        }
+    }
+
+    /// v1 update_config: looks up the full text of a single rule by the `tag`
+    /// emitted in `strategyManifest[].id`. The current store keys rules by
+    /// `type` (the human name); we use it as both `id` and `name` for now.
+    static func getRule(tag: String) -> (name: String, content: String)? {
+        let target = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return nil }
+        let rules = loadRules()
+        if let exact = rules.first(where: { manifestId(for: $0) == target }) {
+            return (name: exact.type, content: exact.rule)
+        }
+        if let byType = rules.first(where: {
+            $0.type.trimmingCharacters(in: .whitespacesAndNewlines) == target
+        }) {
+            return (name: byType.type, content: byType.rule)
+        }
+        return nil
+    }
+
+    private static func manifestId(for rule: ProcessStrategyRule) -> String {
+        return rule.type.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Description for `strategyManifest`. Picks the line right after
+    /// "处理目标：" if present (templates start with this header), otherwise the
+    /// first non-empty line. Capped to keep the manifest compact.
+    private static func manifestDescription(for rule: ProcessStrategyRule) -> String {
+        let lines = rule.rule.components(separatedBy: .newlines)
+        for (idx, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("处理目标：") {
+                if idx + 1 < lines.count {
+                    let next = lines[idx + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !next.isEmpty {
+                        return capped(next, max: 60)
+                    }
+                }
+                let after = trimmed.replacingOccurrences(of: "处理目标：", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !after.isEmpty { return capped(after, max: 60) }
+            }
+        }
+        if let firstNonEmpty = lines.first(where: {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) {
+            return capped(firstNonEmpty.trimmingCharacters(in: .whitespacesAndNewlines), max: 60)
+        }
+        return ""
+    }
+
+    private static func capped(_ text: String, max limit: Int) -> String {
+        if text.count <= limit { return text }
+        let prefix = text.prefix(limit)
+        return String(prefix) + "…"
+    }
+
     static func applyChanges(_ changes: [ProcessStrategyChange]) {
         var rules = loadRules()
         var nextId = (rules.map { $0.id }.max() ?? 0) + 1
