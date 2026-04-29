@@ -596,6 +596,8 @@ extension CallSessionController: WebSocketServiceDelegate {
                 return
             }
             print("[Tool] create_template name=\(templateName) contentLen=\(templateContent.count)")
+            // 先把流式中的句子固化为消息，避免顺序错位
+            ttsStreamBuffer.flushAndReset()
             pendingCreateTemplate = OutboundTemplateRequest(id: callId, name: templateName, content: templateContent)
             print("[OutboundAI][Tool] pendingCreateTemplate set callId=\(callId) name=\(templateName)")
             return
@@ -626,6 +628,8 @@ extension CallSessionController: WebSocketServiceDelegate {
                 return
             }
             print("[Tool] initiate_call phone=\(phone) template=\(templateName)")
+            // 先把流式中的句子固化为消息，避免顺序错位
+            ttsStreamBuffer.flushAndReset()
             pendingInitiateCall = OutboundCallRequest(id: callId, phone: phone, templateName: templateName)
             return
         }
@@ -721,6 +725,8 @@ extension CallSessionController: WebSocketServiceDelegate {
                 return
             }
             print("[Tool] schedule_call phone=\(phone) template=\(templateName) scheduledAt=\(scheduledAt) desc=\(timeDescription)")
+            // 先把流式中的句子固化为消息，避免顺序错位
+            ttsStreamBuffer.flushAndReset()
             pendingScheduleCall = OutboundScheduleCallRequest(
                 id: callId,
                 phone: phone,
