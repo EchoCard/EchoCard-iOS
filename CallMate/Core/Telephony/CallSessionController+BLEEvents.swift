@@ -86,10 +86,8 @@ extension CallSessionController {
                 return
             }
             handleBLECallEndPlan(endPlan)
-        case .other(let normalized):
-            if normalized == "audio_streaming" {
-                handleOutboundCloudOnAudioStreamingIfNeeded()
-            }
+        case .other:
+            break
         }
     }
 
@@ -287,7 +285,7 @@ extension CallSessionController {
     }
 
     /// Connects `scene=call_outbound` WS (unless already live) and sends MCU `audio_start` + retry loop.
-    /// Used from `outgoing_answered` and from `call_state(audio_streaming)` when ANCS/`outgoing_answered` is missing.
+    /// Used from `outgoing_answered` only (no `audio_streaming` fallback — rely on ANCS path).
     func runOutboundCloudWsAndAudioStart(wsConnectReason: String) {
         switch transportCoordinator.planBLEOutgoingAnsweredWS(
             networkSatisfied: permissions.networkStatus == .satisfied
@@ -326,34 +324,10 @@ extension CallSessionController {
 
         if !bleAudioStartAcked {
             latAudioStartSentAt = Date()
-            if wsConnectReason == "handleBLECallStateOutgoingAnswered" {
-                latencyLog("send_audio_start_outgoing_answered")
-            } else {
-                latencyLog("send_audio_start_outbound_fallback")
-            }
+            latencyLog("send_audio_start_outgoing_answered")
             sendCallCommand("audio_start", extra: ["codec": bleMCUAudioCodecName], expectAck: false)
         }
         startAudioStartRetryLoop()
-    }
-
-    /// When MCU reports SCO/audio path up but never sends `outgoing_answered`, still bring up call_outbound AI.
-    private func handleOutboundCloudOnAudioStreamingIfNeeded() {
-        guard inputSource == .ble else { return }
-        guard !ws.isConnectedInCallOutboundScene else { return }
-        guard outboundCallId != nil else { return }
-        let trimmedActive = activeOutboundPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let hasCtx = activeOutboundTaskID != nil || !trimmedActive.isEmpty
-        guard hasCtx else { return }
-        print("[OutboundRec] call_state(audio_streaming): fallback outbound cloud WS (outgoing_answered missing or WS not call_outbound)")
-        bleCallActive = true
-        applyPhoneIDContextForWS()
-        if currentIncomingCall == nil {
-            activateOutgoingCallIfNeeded()
-        }
-        if let call = currentIncomingCall, call.title == "[OUTBOUND_TASK]" {
-            liveCallRequest = call
-        }
-        runOutboundCloudWsAndAudioStart(wsConnectReason: "call_state_audio_streaming_fallback")
     }
 
     func handleBLECallStateOutgoingAnswered() {
