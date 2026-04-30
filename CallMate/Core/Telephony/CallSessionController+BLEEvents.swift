@@ -362,7 +362,7 @@ extension CallSessionController {
                 // and the status transitions to .connected (instead of stalling at .ringing).
                 pendingActiveConnect = true
                 print("[PromptTrace] outgoing_answered .connect: calling setCallHelloPromptOverride len=\(activeOutboundPrompt?.count ?? -1) wsIsConnected=\(ws.isConnected) wsIsConnecting=\(ws.isConnecting)")
-                if ws.isConnectedInCallScene {
+                if ws.isConnectedInCallScene || ws.isConnectedInCallOutboundScene {
                     // WS is already live in the correct call scene with a valid session.
                     // This happens when outgoing_answered fires for an incoming call (MCU quirk)
                     // or when the call-scene WS was established earlier (e.g., during ring).
@@ -379,10 +379,15 @@ extension CallSessionController {
                     let taskForApns = activeOutboundTaskID ?? pendingOutboundTaskID
                     ws.setHelloApnsRequestId(OutboundTaskQueueService.shared.apnsRequestId(forTask: taskForApns))
                     ws.setCallHelloPromptOverride(activeOutboundPrompt)
+                    ws.setOutboundHelloContext(OutboundHelloContext(
+                        targetPhone: outboundTargetPhone ?? "",
+                        callerName: outboundCallerName ?? "",
+                        taskGoal: outboundTaskGoal ?? ""
+                    ))
                     transportCoordinator.markWSConnectStarted()
                     let audioFormat = bleWSAudioFormat
-                    print("[OutboundRec] outgoing_answered: connecting WS audioFormat=\(audioFormat)")
-                    ws.connect(audioFormat: audioFormat, scene: .call, reason: "handleBLECallStateOutgoingAnswered")
+                    print("[OutboundRec] outgoing_answered: connecting WS audioFormat=\(audioFormat) scene=call_outbound")
+                    ws.connect(audioFormat: audioFormat, scene: .callOutbound, reason: "handleBLECallStateOutgoingAnswered")
                 }
             }
         }

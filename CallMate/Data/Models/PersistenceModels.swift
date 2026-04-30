@@ -29,8 +29,10 @@ final class CallLog {
 
     var summary: String?
     var fullSummary: String?
-    /// Full structured summary returned by backend `chat_summary.summary`.
+    /// Per-call summary from backend call_outbound scene.
     var backendSummary: String?
+    /// Structured outcome from call_outbound scene: success/partial/failed/pending/not_connected.
+    var outboundOutcome: String?
 
     /// Distinguish simulation calls vs. real calls.
     var isSimulation: Bool
@@ -136,6 +138,7 @@ final class CallLog {
         summary: String? = nil,
         fullSummary: String? = nil,
         backendSummary: String? = nil,
+        outboundOutcome: String? = nil,
         isSimulation: Bool,
         isImportant: Bool? = nil,
         languageRaw: String,
@@ -157,6 +160,7 @@ final class CallLog {
         self.summary = summary
         self.fullSummary = fullSummary
         self.backendSummary = backendSummary
+        self.outboundOutcome = outboundOutcome
         self.isSimulation = isSimulation
         self.isImportant = isImportant
         self.languageRaw = languageRaw

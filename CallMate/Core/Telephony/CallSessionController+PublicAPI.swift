@@ -68,7 +68,13 @@ extension CallSessionController {
     }
 
     /// Bind the next outbound call session to a task ID for exact history mapping.
-    func setOutboundTaskContext(taskID: UUID?, prompt: String? = nil) {
+    func setOutboundTaskContext(
+        taskID: UUID?,
+        prompt: String? = nil,
+        targetPhone: String? = nil,
+        callerName: String? = nil,
+        taskGoal: String? = nil
+    ) {
         pendingOutboundTaskID = taskID
         if let prompt {
             pendingOutboundPrompt = prompt
@@ -79,6 +85,9 @@ extension CallSessionController {
         } else {
             print("[PromptTrace] setOutboundTaskContext: taskID set but prompt=nil, pendingPrompt unchanged=\(pendingOutboundPrompt?.count ?? -1) chars")
         }
+        outboundTargetPhone = targetPhone
+        outboundCallerName = callerName
+        outboundTaskGoal = taskGoal
     }
 
     /// Wait until the outbound call actually begins (status leaves `.ended`).

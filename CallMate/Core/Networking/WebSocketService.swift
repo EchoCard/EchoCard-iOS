@@ -29,6 +29,7 @@ enum WSMessageType: String {
 /// WebSocket 场景
 enum WebSocketScene: String {
     case call = "call"
+    case callOutbound = "call_outbound"
     case initConfig = "init_config"
     case updateConfig = "update_config"
     case evaluation = "evaluation"
@@ -192,6 +193,16 @@ struct IncomingCallContext {
     var callHistorySummary: String
 }
 
+/// Context for `scene=call_outbound` hello.initiate.template_vars.
+struct OutboundHelloContext {
+    /// 拨打号码（summary 留痕）。
+    var targetPhone: String
+    /// 任务相关方姓名（如餐厅名），用于 summary 上下文。
+    var callerName: String
+    /// 任务目标短语（summary 留痕）。
+    var taskGoal: String
+}
+
 /// WebSocket 服务 - 处理与服务端的通信
 class WebSocketService: NSObject, ObservableObject {
     /// 与 `[OutboundAI][Tool]`、`[OutboundAI][WS]` 同族过滤前缀；联调/云端归因时 grep **`OutboundAI`** 或 **`UCv1`**（update_config v1 客户端侧证据链）。
@@ -258,7 +269,14 @@ class WebSocketService: NSObject, ObservableObject {
     @MainActor var isConnectedInCallScene: Bool {
         isConnected && helloScene == .call && sessionId != nil
     }
+    /// True when the WS is fully connected in `.callOutbound` scene.
+    @MainActor var isConnectedInCallOutboundScene: Bool {
+        isConnected && helloScene == .callOutbound && sessionId != nil
+    }
     @MainActor private var callHelloPromptOverride: String?
+    /// 外呼场景 hello.initiate.template_vars 元数据。
+    /// 与 `callHelloPromptOverride` 同时设定，仅 `.callOutbound` 场景使用。
+    @MainActor private var outboundHelloContext: OutboundHelloContext?
     /// APNs `command` 的 `request_id`（仅外呼且由静默推送触发时）；填入 `hello.initiate.apns_request_id`。
     @MainActor private var helloApnsRequestId: String?
     // Per-session init messages injected for config/onboarding flows only.
@@ -379,15 +397,19 @@ class WebSocketService: NSObject, ObservableObject {
     ) {
         if isConnected || isConnecting {
             if helloScene == scene && self.audioFormat == audioFormat {
-                if scene == .call && callHelloPromptOverride != nil {
+                if (scene == .call || scene == .callOutbound) && callHelloPromptOverride != nil {
                     let savedOverride = callHelloPromptOverride
                     let savedApns = helloApnsRequestId
-                    print("[PromptTrace] connect() FORCE-RECONNECT: same scene=call but callHelloPromptOverride was set (\(callHelloPromptOverride!.count)chars), need fresh hello")
+                    let savedOutboundCtx = outboundHelloContext
+                    let sceneLabel = scene == .call ? "call" : "call_outbound"
+                    print("[PromptTrace] connect() FORCE-RECONNECT: same scene=\(sceneLabel) but callHelloPromptOverride was set (\(callHelloPromptOverride!.count)chars), need fresh hello")
                     disconnect()
                     callHelloPromptOverride = savedOverride
                     helloApnsRequestId = savedApns
+                    outboundHelloContext = savedOutboundCtx
                 } else {
-                    print("[PromptTrace] connect() EARLY-RETURN: already \(isConnected ? "connected" : "connecting") scene=\(scene.rawValue) — callHelloPromptOverride=\(callHelloPromptOverride == nil ? "nil" : "\(callHelloPromptOverride!.count)chars")")
+                    let sceneLabel = scene == .call ? "call" : (scene == .callOutbound ? "call_outbound" : scene.rawValue)
+                    print("[PromptTrace] connect() EARLY-RETURN: already \(isConnected ? "connected" : "connecting") scene=\(sceneLabel) — callHelloPromptOverride=\(callHelloPromptOverride == nil ? "nil" : "\(callHelloPromptOverride!.count)chars")")
                     return
                 }
             }
@@ -402,10 +424,16 @@ class WebSocketService: NSObject, ObservableObject {
             }
             let savedOverride = callHelloPromptOverride
             let savedApns = helloApnsRequestId
+            let savedOutboundCtx = outboundHelloContext
             disconnect()
             if scene == .call {
                 callHelloPromptOverride = savedOverride
                 helloApnsRequestId = savedApns
+            } else if scene == .callOutbound {
+                // 外呼场景切换：保留 prompt override + outbound 元数据。
+                callHelloPromptOverride = savedOverride
+                helloApnsRequestId = savedApns
+                outboundHelloContext = savedOutboundCtx
             }
         }
         if let initMessages {
@@ -658,6 +686,13 @@ class WebSocketService: NSObject, ObservableObject {
         print("[WS] setCallHelloPromptOverride length=\(callHelloPromptOverride?.count ?? 0)")
     }
 
+    /// 设置外呼场景 hello.initiate.template_vars 的元数据（`scene=call_outbound` 专用）。
+    @MainActor
+    func setOutboundHelloContext(_ ctx: OutboundHelloContext?) {
+        outboundHelloContext = ctx
+        print("[WS] setOutboundHelloContext phone=\(ctx?.targetPhone ?? "nil") caller=\(ctx?.callerName ?? "nil") goal=\(ctx?.taskGoal ?? "nil")")
+    }
+
     /// 下一通 `scene=call` 的 hello 是否在 `initiate` 中带 `apns_request_id`（非 APNs 外呼传 nil）。
     @MainActor
     func setHelloApnsRequestId(_ requestId: String?) {
@@ -686,6 +721,7 @@ class WebSocketService: NSObject, ObservableObject {
         helloAcked = false
         callHelloPromptOverride = nil
         helloApnsRequestId = nil
+        outboundHelloContext = nil
         pendingInitMessages = nil
         pendingIncomingCallContext = nil
         pendingPhoneIDSource = nil
@@ -728,6 +764,13 @@ class WebSocketService: NSObject, ObservableObject {
             if let prompt = callHelloPromptOverride {
                 initiate["prompt"] = appendCallEndMarkerInstructionIfNeeded(to: prompt)
             }
+            if let rid = helloApnsRequestId?.trimmingCharacters(in: .whitespacesAndNewlines), !rid.isEmpty {
+                initiate["apns_request_id"] = rid
+            }
+        } else if helloScene == .callOutbound {
+            // call_outbound scene (plan/2026-04-30-call-outbound-client-delta.md §3):
+            // prompt goes to template_vars.business_prompt (not initiate.prompt).
+            // ✿END✿ instruction is NOT appended — server template handles it.
             if let rid = helloApnsRequestId?.trimmingCharacters(in: .whitespacesAndNewlines), !rid.isEmpty {
                 initiate["apns_request_id"] = rid
             }
@@ -789,6 +832,29 @@ class WebSocketService: NSObject, ObservableObject {
             // template/outbound skills. If a future build introduces a gate,
             // wrap this with the relevant flag and omit the field when off.
             templateVars["templateManifest"] = OutboundTemplateStore.getManifest()
+        } else if helloScene == .callOutbound {
+            // call_outbound scene (plan/2026-04-30-call-outbound-client-delta.md §3.2):
+            // business_prompt 必填 — 从 callHelloPromptOverride 提取业务规则正文。
+            if let prompt = callHelloPromptOverride {
+                let businessPrompt = OutboundTemplateStore.extractBusinessPrompt(
+                    from: prompt,
+                    businessVariables: nil
+                )
+                templateVars["business_prompt"] = businessPrompt
+                print("[WS] hello call_outbound business_prompt len=\(businessPrompt.count)")
+            }
+            // 外呼元数据
+            if let ctx = outboundHelloContext {
+                if !ctx.targetPhone.isEmpty {
+                    templateVars["target_phone"] = ctx.targetPhone
+                }
+                if !ctx.callerName.isEmpty {
+                    templateVars["callerName"] = ctx.callerName
+                }
+                if !ctx.taskGoal.isEmpty {
+                    templateVars["task_goal"] = ctx.taskGoal
+                }
+            }
         } else {
             let processStrategy = ProcessStrategyStore.processStrategyJSONString()
             if let processStrategy, !processStrategy.isEmpty {

@@ -246,6 +246,10 @@ final class CallSessionController: NSObject, ObservableObject {
     var activeOutboundTaskID: UUID?
     var pendingOutboundPrompt: String?
     var activeOutboundPrompt: String?
+    /// 外呼场景 hello 元数据（号码、相关方、任务目标）。
+    var outboundTargetPhone: String?
+    var outboundCallerName: String?
+    var outboundTaskGoal: String?
     /// Set when BLE reports call terminated before the session was ever established
     /// (e.g. user hangs up while phone is still ringing, before call_state(active)).
     /// Allows waitForOutboundCallStart to exit early instead of hanging for 60 s.

@@ -21,6 +21,7 @@ struct OutboundTaskDTO: Encodable {
     var dial_failure_count: Int
     var call_frequency: Int
     var redial_missed: Bool
+    var summary: String?
     var created_at: String
 
     static func from(_ task: OutboundTask) -> OutboundTaskDTO {
@@ -35,6 +36,7 @@ struct OutboundTaskDTO: Encodable {
             dial_failure_count: task.dialFailureCount,
             call_frequency: task.callFrequency,
             redial_missed: task.redialMissed,
+            summary: task.summary,
             created_at: ISO8601DateFormatter().string(from: task.createdAt)
         )
     }
@@ -352,7 +354,13 @@ final class OutboundTaskQueueService: ObservableObject {
             await controller.waitForOutboundCallEnd(timeoutSeconds: 300)
             await waitForDialSlotIfNeeded()
             let personalizedPrompt = Self.substituteVariables(taskSnapshot.promptRule, contact: contact)
-            controller.setOutboundTaskContext(taskID: taskID, prompt: personalizedPrompt)
+            controller.setOutboundTaskContext(
+                taskID: taskID,
+                prompt: personalizedPrompt,
+                targetPhone: contact.phone,
+                callerName: "",
+                taskGoal: ""
+            )
             controller.prepareForOutboundDial()
             lastDialStartedAt = Date()
             let ackResult = await waitForDialAckResult { ble.dialPhoneNumber(contact.phone, expectAck: true) }
