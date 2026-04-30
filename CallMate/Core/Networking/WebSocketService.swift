@@ -1494,6 +1494,8 @@ class WebSocketService: NSObject, ObservableObject {
             return nil
         case .outboundChat:
             return "outbound_call"
+        case .callOutbound:
+            return nil
         }
     }
 
