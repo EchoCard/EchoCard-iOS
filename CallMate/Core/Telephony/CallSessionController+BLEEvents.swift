@@ -289,6 +289,7 @@ extension CallSessionController {
          * MCU detected ANCS "当前通话" — the callee has answered the outgoing
          * call. Now connect to AI cloud and start audio.
          */
+        print("[OutboundTest] outgoing_answered_rx status=\(status) outboundCallId=\(outboundCallId?.uuidString ?? "nil") bleCallActive=\(bleCallActive) wsSession=\(ws.sessionId != nil)")
         print("[OutboundRec] call_state(outgoing_answered): callee picked up, connecting WS and starting audio")
         print("[PromptTrace] outgoing_answered ENTRY: activePrompt=\(activeOutboundPrompt == nil ? "nil" : "\(activeOutboundPrompt!.count)chars") pendingPrompt=\(pendingOutboundPrompt == nil ? "nil" : "\(pendingOutboundPrompt!.count)chars")")
         print("[OutboundRec][TaskID] outgoing_answered ENTRY: activeOutboundTaskID=\(activeOutboundTaskID?.uuidString ?? "⚠️ NIL") outboundCallId=\(outboundCallId?.uuidString ?? "⚠️ NIL — call_state(active) may have been missed!")")
