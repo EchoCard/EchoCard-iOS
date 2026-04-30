@@ -18,6 +18,30 @@ enum OutboundTemplateLookup {
 }
 
 enum OutboundTemplateStore {
+    /// Extract the business-rules body from a full template (JSON schema header + `####` sections).
+    ///
+    /// - `templateContent`: Raw `OutboundPromptTemplate.content` (JSON header + `#### 角色设定 ####`... body).
+    /// - `businessVariables`: Key-value pairs for `&{key}` substitution (usually from the JSON header's
+    ///   `business_variables` block).
+    /// - Returns: The text starting from the first `#### ` section, with `&{key}` replaced.
+    ///
+    /// Matches plan spec §3.3: skips the JSON schema header, takes `#### 角色设定 ####` to end,
+    /// substitutes `&{key}` with provided values.
+    static func extractBusinessPrompt(
+        from templateContent: String,
+        businessVariables: [String: String]? = nil
+    ) -> String {
+        let sectionStart = templateContent.range(of: "#### ")?.lowerBound
+            ?? templateContent.startIndex
+        var body = String(templateContent[sectionStart...])
+
+        if let vars = businessVariables {
+            for (key, value) in vars {
+                body = body.replacingOccurrences(of: "&{\(key)}", with: value)
+            }
+        }
+        return body
+    }
     /// Returns one element per persisted template. Element keys match v1 spec:
     /// `name`, `task_type`, `updated_at` (ISO8601 date).
     @MainActor

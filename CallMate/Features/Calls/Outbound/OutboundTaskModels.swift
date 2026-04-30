@@ -110,6 +110,8 @@ struct OutboundTask: Identifiable, Codable {
     var dialFailureCount: Int
     var callFrequency: Int
     var redialMissed: Bool
+    /// Backend call_outbound scene summary (outcome JSON from server).
+    var summary: String?
     let createdAt: Date
 
     init(
@@ -123,6 +125,7 @@ struct OutboundTask: Identifiable, Codable {
         dialFailureCount: Int = 0,
         callFrequency: Int = 30,
         redialMissed: Bool = false,
+        summary: String? = nil,
         createdAt: Date
     ) {
         self.id = id
@@ -135,6 +138,7 @@ struct OutboundTask: Identifiable, Codable {
         self.dialFailureCount = dialFailureCount
         self.callFrequency = callFrequency
         self.redialMissed = redialMissed
+        self.summary = summary
         self.createdAt = createdAt
     }
 
@@ -149,6 +153,7 @@ struct OutboundTask: Identifiable, Codable {
         case dialFailureCount
         case callFrequency
         case redialMissed
+        case summary
         case createdAt
     }
 
@@ -164,6 +169,7 @@ struct OutboundTask: Identifiable, Codable {
         dialFailureCount = try container.decodeIfPresent(Int.self, forKey: .dialFailureCount) ?? 0
         callFrequency = try container.decodeIfPresent(Int.self, forKey: .callFrequency) ?? 30
         redialMissed = try container.decodeIfPresent(Bool.self, forKey: .redialMissed) ?? false
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
 }
@@ -174,6 +180,10 @@ enum OutboundTaskStatus: String, Codable {
     case completed
     case partial
     case failed
+    /// AI 完成了通话，但 summary 要求机主后续跟进（如"机主需确认订金"）。
+    case pending
+    /// 外呼未接通（无真人接听，仅系统提示音）。
+    case notConnected
 
     func title(language: Language) -> String {
         switch self {
@@ -182,6 +192,8 @@ enum OutboundTaskStatus: String, Codable {
         case .completed: return language == .zh ? "已完成" : "Completed"
         case .partial: return language == .zh ? "部分成功" : "Partial"
         case .failed: return language == .zh ? "失败" : "Failed"
+        case .pending: return language == .zh ? "待跟进" : "Pending"
+        case .notConnected: return language == .zh ? "未接通" : "Not Connected"
         }
     }
 
@@ -192,6 +204,8 @@ enum OutboundTaskStatus: String, Codable {
         case .completed: return AppColors.success
         case .partial: return AppColors.warning
         case .failed: return AppColors.error
+        case .pending: return AppColors.accent
+        case .notConnected: return AppColors.textSecondary
         }
     }
 }
@@ -221,7 +235,7 @@ enum OutboundTaskStore {
             var tasks = try JSONDecoder().decode([OutboundTask].self, from: data)
             for i in tasks.indices {
                 if tasks[i].status == .running {
-                    tasks[i].status = .scheduled
+                    tasks[i].status = .pending
                 }
             }
             return tasks
