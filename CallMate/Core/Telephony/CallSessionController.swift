@@ -342,7 +342,9 @@ final class CallSessionController: NSObject, ObservableObject {
     var lastTtsAudioRxAt: Date = .distantPast
     var ttsBinaryRxBatchStartAt: Date?
     var ttsBinaryRxBatchStartPendingFrames: Int = 0
-    
+    /// `scene=call` + BLE：连续下行时每个 WS 会话仅在首包二进制做一次 `prepareForTTSStart`。
+    var continuousBleDownlinkSessionPrepared: Bool = false
+
     static let logDateFormatter: DateFormatter = {
         let df = DateFormatter()
         df.locale = Locale(identifier: "en_US_POSIX")

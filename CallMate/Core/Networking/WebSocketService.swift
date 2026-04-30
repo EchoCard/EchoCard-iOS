@@ -82,6 +82,8 @@ nonisolated final class WSAudioTxPump: @unchecked Sendable {
     private var txCount: Int = 0
     private var txBytes: Int = 0
     private var lastLogAt: Date = .distantPast
+    /// 用于检测上行 Opus 是否长时间断发（服务端可能据此停 filler）。
+    private var lastAudioTxAt: Date = .distantPast
 
     func attach(task: URLSessionWebSocketTask) {
         lock.lock()
@@ -91,6 +93,7 @@ nonisolated final class WSAudioTxPump: @unchecked Sendable {
         self.txCount = 0
         self.txBytes = 0
         self.lastLogAt = .distantPast
+        self.lastAudioTxAt = .distantPast
         lock.unlock()
     }
 
@@ -101,6 +104,7 @@ nonisolated final class WSAudioTxPump: @unchecked Sendable {
         self.txCount = 0
         self.txBytes = 0
         self.lastLogAt = .distantPast
+        self.lastAudioTxAt = .distantPast
         lock.unlock()
     }
 
@@ -125,7 +129,16 @@ nonisolated final class WSAudioTxPump: @unchecked Sendable {
         let task = self.task
         let connected = self.connected
         let sessionId = self.sessionIdSnapshot
+        var gapMsForLog: Int?
         if connected {
+            let now = Date()
+            if lastAudioTxAt != .distantPast {
+                let gap = now.timeIntervalSince(lastAudioTxAt)
+                if gap >= 0.35 {
+                    gapMsForLog = Int(gap * 1000)
+                }
+            }
+            lastAudioTxAt = now
             txCount += 1
             txBytes += data.count
         }
@@ -136,6 +149,10 @@ nonisolated final class WSAudioTxPump: @unchecked Sendable {
         let shouldLogRate = verboseLogging && connected && now.timeIntervalSince(lastLogAt) > 2.0
         if shouldLogRate { lastLogAt = now }
         lock.unlock()
+
+        if let gapMs = gapMsForLog {
+            print("[CloudAudioProof] uplink_inter_frame_gap_ms=\(gapMs) probe=long_gap_may_cause_server_to_pause_filler_compare_with_downlink_gap")
+        }
 
         guard connected, let task else {
             print("[MIC_CHAIN] ws_send_audio_blocked: isConnected=false bytes=\(data.count)")
@@ -173,6 +190,9 @@ protocol WebSocketServiceDelegate: AnyObject {
     func webSocketDidReceiveError(message: String)
     func webSocketDidReceiveAIHangup()  // AI 主动挂断
     func webSocketDidReceiveToolCall(callId: String, name: String, arguments: [String: Any])
+    /// 服务端推送 filler。是否真的转给 MCU（`play_filler` over BLE）由 delegate 决定 ——
+    /// 仅在 `inputSource == .ble` 的真实通话里转发；模拟麦克风通话不该惊动 MCU。
+    func webSocketDidReceiveFiller(id: String)
 }
 
 // MARK: - Incoming Call Context
@@ -1170,9 +1190,10 @@ class WebSocketService: NSObject, ObservableObject {
             // (e.g. CallSessionController enqueueing into the BLE uplink `TTSUplinkState`).
             // Runs fully nonisolated — a SwiftUI main-thread stall cannot delay call audio.
             binaryFastRxHook?(data)
-            // Slow path: @MainActor handler still runs the legacy delegate notification for
-            // diagnostic counters, drain scheduling, first-frame playback prep, etc.
-            Task { @MainActor [weak self] in
+            // 与 `tts start/stop` 的 `DispatchQueue.main.sync` 对齐：保证「JSON → 二进制」在 MainActor
+            // 上与收包顺序严格一致，避免 `Task { @MainActor }` 插队导致首帧在 `tts_start`/flush
+            // 之后仍看到 `!isPlaying` 从而误触发 `sim_continuous_downlink_prepare` + teardown。
+            DispatchQueue.main.sync { [weak self] in
                 self?.handleBinaryMessage(data)
             }
         @unknown default:
@@ -1210,14 +1231,14 @@ class WebSocketService: NSObject, ObservableObject {
             processTTSMessage(json)
 
         case "filler":
-            // Server pushes `{type:"filler", id:"mm_short", text:"嗯"}` during AI
-            // think-gaps. iOS forwards to MCU which plays a pre-loaded mSBC blob
-            // over HFP eSCO. No sid, no ack wait — see docs/tts-filler-low-latency.md §7.
+            // 服务端在 AI think-gap 期间下推 `{type:"filler", id:"mm_short", text:"嗯"}`。
+            // 真实 BLE 通话场景下 iOS 把它转给 MCU，由 MCU 通过 HFP eSCO 播 mSBC blob，
+            // 让对端在思考间隔听到"嗯/啊"。详见 docs/tts-filler-low-latency.md §7。
             //
-            // 调试开关：UserDefaults `callmate.debug_disable_filler_forward`。
-            // 对方听 TTS 顿挫残留排查（docs/tts-uplink-stutter-pending.md P0 候选 A），
-            // 由设备诊断页的 Toggle 控制，打开时跳过本端 play_filler 转发，MCU 就不走
-            // `0cec1615` 引入的 filler mute gate，A/B 验证 filler 边界是否造成顿挫。
+            // 这里只做"接收 + 调试开关 + 上交 delegate"。是否真的发 `play_filler` 到 MCU
+            // 由 delegate（CallSessionController）按 `inputSource` 决定 —— 模拟麦克风通话
+            // 没有 BLE 通话，MCU 收到 play_filler 会回 result=-2，反过来误触发 iOS 的
+            // phone_handled_rejected → end()，把模拟通话整段拆掉。
             let id = (json["id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if UserDefaults.standard.bool(forKey: "callmate.debug_disable_filler_forward") {
                 print("[WS][filler] DEBUG_DISABLED forward id=\(id)")
@@ -1227,12 +1248,9 @@ class WebSocketService: NSObject, ObservableObject {
                 print("[WS][filler] ignore: empty id")
                 break
             }
-            print("[WS][filler] forward id=\(id)")
-            CallMateBLEClient.shared.sendCommand(
-                "play_filler",
-                extra: ["filler_id": id],
-                expectAck: false
-            )
+            Task { @MainActor [weak self] in
+                self?.notifyDelegates { $0.webSocketDidReceiveFiller(id: id) }
+            }
 
         case "error":
             // Server-side errors (incl. auth/token) — log full payload; `message` alone may omit fields.
@@ -1295,8 +1313,19 @@ class WebSocketService: NSObject, ObservableObject {
     private func handleBinaryMessage(_ data: Data) {
         // 二进制帧 = Opus 编码的音频数据
         // Debug: confirm binary frames are being received
+        let now = Date()
+        if let last = lastDownlinkBinaryRxAt {
+            let gapMs = Int(now.timeIntervalSince(last) * 1000)
+            if gapMs >= 350 {
+                print("[CloudAudioProof] downlink_inter_frame_gap_ms=\(gapMs) probe=if_heard_silence_aligns_then_likely_CLOUD_OR_LINK_paused_opus_if_no_silence_heard_then_ios_playback_buffer")
+            }
+        }
+        lastDownlinkBinaryRxAt = now
         binaryRxCount += 1
         binaryRxBytes += data.count
+        if ttsUtteranceOpen {
+            opusRxDuringCurrentTtsUtterance += 1
+        }
         if binaryRxCount <= 12 || (binaryRxCount % 50) == 0 {
             print("[CloudAudioProof] binary_opus_rx frame#=\(binaryRxCount) frame_bytes=\(data.count) cum_bytes=\(binaryRxBytes) scene_snap=\(cloudProofSceneSnapshot)")
         }
@@ -1330,6 +1359,9 @@ class WebSocketService: NSObject, ObservableObject {
         helloAcked = true
         binaryRxCount = 0
         binaryRxBytes = 0
+        lastDownlinkBinaryRxAt = nil
+        ttsUtteranceOpen = false
+        opusRxDuringCurrentTtsUtterance = 0
         cloudProofSceneSnapshot = helloScene.rawValue
         if helloScene == .call {
             callHelloPromptOverride = nil
@@ -1387,7 +1419,9 @@ class WebSocketService: NSObject, ObservableObject {
             let sampleRate = json["sample_rate"] as? Int
             let sid = json["session_id"] as? String ?? "nil"
             let rawDescription = String(describing: json)
-            Task { @MainActor [weak self] in
+            // 必须与下行二进制严格有序：`Task { @MainActor }` 与二进制帧的 MainActor Task
+            // 可能乱序，导致首帧在 prepare 前到达或 tts_stop drain 与新 utterance 交错。
+            DispatchQueue.main.sync { [weak self] in
                 self?.handleTTSStartMessage(sampleRate: sampleRate, sessionID: sid, rawDescription: rawDescription)
             }
         case "sentence_start":
@@ -1403,7 +1437,7 @@ class WebSocketService: NSObject, ObservableObject {
                 self?.handleTTSSentenceMessage(text: displayText, isStart: false, containsHangup: containsHangup)
             }
         case "stop":
-            Task { @MainActor [weak self] in
+            DispatchQueue.main.sync { [weak self] in
                 self?.handleTTSStopMessage()
             }
         default:
@@ -1414,7 +1448,9 @@ class WebSocketService: NSObject, ObservableObject {
     @MainActor
     private func handleTTSStartMessage(sampleRate: Int?, sessionID: String, rawDescription: String) {
         let resolvedSampleRate = sampleRate ?? downstreamSampleRate
-        print("[CloudAudioProof] tts_ctrl_start scene=\(helloScene.rawValue) sample_rate=\(resolvedSampleRate) sid=\(sessionID)")
+        ttsUtteranceOpen = true
+        opusRxDuringCurrentTtsUtterance = 0
+        print("[CloudAudioProof] tts_ctrl_start scene=\(helloScene.rawValue) sample_rate=\(resolvedSampleRate) sid=\(sessionID) note=sim_call_opus_may_flow_before_after_this_json")
         print("[WS] TTS 开始, session_id=\(sessionID) sample_rate=\(resolvedSampleRate) raw=\(rawDescription)")
         notifyDelegates { $0.webSocketDidReceiveTTSStart(sampleRate: resolvedSampleRate) }
     }
@@ -1436,6 +1472,19 @@ class WebSocketService: NSObject, ObservableObject {
 
     @MainActor
     private func handleTTSStopMessage() {
+        let frames = opusRxDuringCurrentTtsUtterance
+        let hadOpenUtterance = ttsUtteranceOpen
+        ttsUtteranceOpen = false
+        opusRxDuringCurrentTtsUtterance = 0
+        let verdict: String
+        if !hadOpenUtterance {
+            verdict = "tts_stop_without_prior_tts_start_json(probe_protocol_or_reorder)"
+        } else if frames == 0 {
+            verdict = "LIKELY_CLOUD_OR_LINK_NO_OPUS_BINARY_DURING_UTTERANCE"
+        } else {
+            verdict = "CLOUD_SENT_OPUS_frames=\(frames)_IF_SILENT_CHECK_IOS_PLAYBACK"
+        }
+        print("[CloudAudioProof] VERDICT_ws_tts_span scene=\(helloScene.rawValue) opus_frames_between_start_stop=\(frames) → \(verdict)")
         print("[WS] TTS 结束")
         notifyDelegates { $0.webSocketDidReceiveTTSStop() }
     }
@@ -1517,6 +1566,11 @@ class WebSocketService: NSObject, ObservableObject {
 
     @MainActor private var binaryRxCount: Int = 0
     @MainActor private var binaryRxBytes: Int = 0
+    /// 上一帧下行 Opus 到达时间，用于检测「云端/链路停发」与「本机听感静音」是否对齐。
+    @MainActor private var lastDownlinkBinaryRxAt: Date?
+    /// `tts state=start` 之后、`state=stop` 之前收到的下行 Opus 二进制帧数（用于判定云端是否真下发音频）。
+    @MainActor private var opusRxDuringCurrentTtsUtterance: Int = 0
+    @MainActor private var ttsUtteranceOpen: Bool = false
     /// 供 URLSession 收包线程打印 `[CloudAudioProof]`（与 `helloScene` 同步更新）。
     nonisolated(unsafe) private var cloudProofSceneSnapshot: String = ""
     @MainActor private var helloRetryTask: Task<Void, Never>?

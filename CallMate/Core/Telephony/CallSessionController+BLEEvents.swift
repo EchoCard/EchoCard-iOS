@@ -549,6 +549,13 @@ extension CallSessionController {
         case .ignore:
             return
         case .phoneHandledRejected:
+            // result=-2 仅在「确实存在 BLE 通话」时才视为终止信号；模拟麦克风通话
+            // （scene=.call + inputSource=.microphone）不依赖 MCU 通话态，误 `end()`
+            // 会拆掉播放管线，下一帧 binary 触发 preparePlayback 全量重建。
+            guard bleCallActive || inputSource == .ble else {
+                print("[CallSession] cmd=\(cmd) phone_handled_rejected ignored (no_active_ble_call inputSource=\(inputSource))")
+                return
+            }
             print("[CallSession] cmd=\(cmd) rejected (phone handled). Exit live call.")
             remoteCallTerminalState = true
             phoneHandledCall = true

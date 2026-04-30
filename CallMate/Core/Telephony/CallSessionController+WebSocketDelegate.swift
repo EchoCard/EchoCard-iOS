@@ -5,6 +5,13 @@ import Foundation
 extension CallSessionController: WebSocketServiceDelegate {
     func webSocketDidConnect(sessionId: String) {
         guard isActiveController else { return }
+        continuousBleDownlinkSessionPrepared = false
+        if usesContinuousCloudDownlinkCallAudio {
+            ttsAudioRxCount = 0
+            ttsAudioRxBytes = 0
+            ttsBinaryRxBatchStartAt = nil
+            ttsBinaryRxBatchStartPendingFrames = 0
+        }
         hasReceivedWSHelloInCurrentCall = true
         print("[CloudAudioProof] delegate_ws_hello_ack sessionId_prefix=\(String(sessionId.prefix(12)))… bleCallActive=\(bleCallActive) bleAudAck=\(bleAudioStartAcked) pendingActiveConnect=\(pendingActiveConnect) status=\(status) scene=\(scene) wsListenAlready=\(wsListeningStarted)")
         print("[NOSOUND] ws_connected: sessionId=\(sessionId) bleCallActive=\(bleCallActive) acked=\(bleAudioStartAcked) wsListening=\(wsListeningStarted)")
@@ -42,7 +49,11 @@ extension CallSessionController: WebSocketServiceDelegate {
             for sec in [5, 15] {
                 try? await Task.sleep(nanoseconds: UInt64(sec) * 1_000_000_000)
                 guard let self else { return }
-                print("[CloudAudioProof] watchdog t+\(sec)s tts_frames=\(self.ttsAudioRxCount) tts_bytes=\(self.ttsAudioRxBytes) wsListening=\(self.wsListeningStarted) ws_sid_nil=\(self.ws.sessionId == nil) bleAudAck=\(self.bleAudioStartAcked) status=\(self.status)")
+                let simMic = self.inputSource == .microphone && self.scene == .call && self.monitorTTSOnPhone
+                let v = self.ttsAudioRxCount == 0
+                    ? "no_downlink_opus_seen_by_active_session_yet(compare_VERDICT_ws_tts_span_on_tts_stop)"
+                    : "downlink_opus_seen_by_session_frames=\(self.ttsAudioRxCount)"
+                print("[CloudAudioProof] watchdog t+\(sec)s tts_frames=\(self.ttsAudioRxCount) tts_bytes=\(self.ttsAudioRxBytes) wsListening=\(self.wsListeningStarted) ws_sid_nil=\(self.ws.sessionId == nil) bleAudAck=\(self.bleAudioStartAcked) status=\(self.status) sim_mic_call=\(simMic) verdict=\(v)")
             }
         }
     }
@@ -306,6 +317,31 @@ extension CallSessionController: WebSocketServiceDelegate {
         messages.append(.init(text: text, isAI: false))
     }
 
+    /// 手机监听下行：`tts start` 可能晚于首包 Opus；`scene=call` 时还有连续背景流。播放管线须在未 `isPlaying` 时按帧补建（亦覆盖 `init_config` 等麦克风监听场景）。
+    private func ensureSimMicCloudDownlinkPlaybackReady(reason: String) {
+        guard monitorTTSOnPhone, inputSource == .microphone else { return }
+        if audioRouter.isPlaying() { return }
+        let sr = max(8000, currentTTSSampleRate > 0 ? currentTTSSampleRate : ws.downstreamSampleRate)
+        let playbackOnly = scene.isManualInteractionScene
+        // 连续流：先尝试「同 SR / 同模式下图仍在」的轻量恢复，避免仅因 `!isPlaying` 走整段 teardown。
+        if usesContinuousCloudDownlinkCallAudio,
+           audioRouter.tryResumeContinuousOpusPlaybackIfPossible(sampleRate: sr, playbackOnly: playbackOnly) {
+            print("[CloudAudioProof] sim_continuous_downlink_resume_inline reason=\(reason) sr=\(sr) playbackOnly=\(playbackOnly)")
+            return
+        }
+        print("[CloudAudioProof] sim_continuous_downlink_prepare reason=\(reason) sr=\(sr) ws_downstream_sr=\(ws.downstreamSampleRate) current_tts_sr=\(currentTTSSampleRate) scene=\(scene.rawValue)")
+        audioRouter.prepareForTTSStart(
+            monitorTTSOnPhone: monitorTTSOnPhone,
+            inputSource: inputSource,
+            scene: scene,
+            sampleRate: sr,
+            isSpeaker: isSpeaker
+        )
+        if !audioRouter.isPlaying() {
+            print("[CloudAudioProof] sim_continuous_downlink_prepare_STILL_IDLE search=prepareForTTSStart_preparePlayback_FAILED")
+        }
+    }
+
     func webSocketDidReceiveTTSStart(sampleRate: Int) {
         guard isActiveController else { return }
         print("[NOSOUND] tts_start: sampleRate=\(sampleRate) acked=\(bleAudioStartAcked) uplinkQ=\(audioRouter.uplinkQueueCount())")
@@ -318,45 +354,81 @@ extension CallSessionController: WebSocketServiceDelegate {
         engageMicGuardForTTS()
         logTTSTrace("tts_start", extra: "sampleRate=\(sampleRate)")
         currentTTSSampleRate = sampleRate
-        // Realtime / BLE TTS start audio setup is delegated to audio router.
-        let prepareStartedAt = Date()
-        audioRouter.prepareForTTSStart(
-            monitorTTSOnPhone: monitorTTSOnPhone,
-            inputSource: inputSource,
-            scene: scene,
-            sampleRate: sampleRate,
-            isSpeaker: isSpeaker
-        )
-        let prepareDurationMs = Int(Date().timeIntervalSince(prepareStartedAt) * 1000)
-        latencyManualSceneLog(
-            "tts_prepare_complete",
-            extra: "sampleRate=\(sampleRate) duration=\(prepareDurationMs)ms monitorOnPhone=\(monitorTTSOnPhone)"
-        )
+        if usesContinuousCloudDownlinkCallAudio {
+            // 连续下行：不在 JSON 边界重建播放/录音管线；由 hello 后首包二进制 + ensure 驱动。
+            latencyManualSceneLog(
+                "tts_prepare_skipped_continuous_call",
+                extra: "sampleRate=\(sampleRate) monitorOnPhone=\(monitorTTSOnPhone)"
+            )
+            print("[CloudAudioProof] tts_json_start_continuous_mode no_prepare_on_json sampleRate=\(sampleRate) input=\(inputSource)")
+        } else {
+            let prepareStartedAt = Date()
+            audioRouter.prepareForTTSStart(
+                monitorTTSOnPhone: monitorTTSOnPhone,
+                inputSource: inputSource,
+                scene: scene,
+                sampleRate: sampleRate,
+                isSpeaker: isSpeaker
+            )
+            let prepareDurationMs = Int(Date().timeIntervalSince(prepareStartedAt) * 1000)
+            latencyManualSceneLog(
+                "tts_prepare_complete",
+                extra: "sampleRate=\(sampleRate) duration=\(prepareDurationMs)ms monitorOnPhone=\(monitorTTSOnPhone)"
+            )
+        }
+        if inputSource == .microphone && scene == .call && monitorTTSOnPhone {
+            print("[CloudAudioProof] sim_mic_tts_json_start utterance_boundary isPlaying_after_delegate_prepare=\(audioRouter.isPlaying()) note=continuous_call_audio_binary_driven")
+        }
         currentTTSText = ""
         currentSTTText = ""
         // flushAndReset: 若上一句还在逐字播出，把完整文字提交到消息列表后再清空，
         // 避免 tool_call 触发新 tts_start 时正在显示的流式气泡和文字消失。
         ttsStreamBuffer.flushAndReset()
 
-        // Reset TTS audio counters (drain starts when first audio frame arrives)
-        ttsAudioRxCount = 0
-        ttsAudioRxBytes = 0
-        ttsBinaryRxBatchStartAt = nil
-        ttsBinaryRxBatchStartPendingFrames = 0
+        if !usesContinuousCloudDownlinkCallAudio {
+            ttsAudioRxCount = 0
+            ttsAudioRxBytes = 0
+            ttsBinaryRxBatchStartAt = nil
+            ttsBinaryRxBatchStartPendingFrames = 0
+        }
 
-        // Reset uplink counters for BLE (don't start drain yet; wait for first audio frame)
         if inputSource == .ble {
-            audioRouter.startNewTTSBoostWindow(boostMs: ttsUplinkBoostMs)
-            // Note: drain is kicked in webSocketDidReceiveTTSAudio when first frame arrives
+            if usesContinuousCloudDownlinkCallAudio {
+                // 连续流：加强窗与 uplink 诊断计数在首包二进制处 `startNewTTSBoostWindow`，避免句边界 resetCounters。
+                print("[TTS->BLE] tts_start_continuous_skip_boost_reset")
+            } else {
+                audioRouter.startNewTTSBoostWindow(boostMs: ttsUplinkBoostMs)
+            }
         }
     }
 
     func webSocketDidReceiveTTSAudio(data: Data) {
         guard isActiveController else { return }
+        // 新到二进制：先取消上一句 `tts_stop` 的延迟停播，避免与连续下行（背景音）冲突。
+        audioRouter.cancelTTSStopPlaybackTask()
+        if usesContinuousCloudDownlinkCallAudio && inputSource == .ble && !continuousBleDownlinkSessionPrepared {
+            continuousBleDownlinkSessionPrepared = true
+            let sr = max(
+                8000,
+                ws.downstreamSampleRate > 0
+                    ? ws.downstreamSampleRate
+                    : (currentTTSSampleRate > 0 ? currentTTSSampleRate : 16000)
+            )
+            print("[CloudAudioProof] continuous_ble_downlink_prepare_first_binary sr=\(sr) monitorOnPhone=\(monitorTTSOnPhone)")
+            audioRouter.prepareForTTSStart(
+                monitorTTSOnPhone: monitorTTSOnPhone,
+                inputSource: inputSource,
+                scene: scene,
+                sampleRate: sr,
+                isSpeaker: isSpeaker
+            )
+            audioRouter.startNewTTSBoostWindow(boostMs: ttsUplinkBoostMs)
+        }
+        // 模拟通话：二进制先于/晚于 `tts start` 都常见；`tts_stop` drain 也可能短暂 teardown — 任意帧到达时若未播放则重新 prepare。
+        ensureSimMicCloudDownlinkPlaybackReady(reason: "binary_rx")
         traceMark("WS_downlink_first_rx(binary)", store: &tWsFirstDownRxNs)
         // Debug: confirm delegate call arrives
         lastTtsAudioRxAt = Date()
-        audioRouter.cancelTTSStopPlaybackTask()
         ttsAudioRxCount += 1
         ttsAudioRxBytes += data.count
         let pendingFramesNow = audio.effectivePendingPlaybackBufferCount()
@@ -383,12 +455,6 @@ extension CallSessionController: WebSocketServiceDelegate {
             if verboseRealtimeAudioLoggingEnabled {
                 print("[TTS] first frame rx at \(nowLogString()) format=\(ws.audioFormat) bytes=\(data.count)")
             }
-            // Re-assert speaker preference on first audible frame in case
-            // session/route changed during startListening/startRecording.
-            audioRouter.reassertSpeakerOnFirstTTSAudioFrameIfNeeded(
-                monitorTTSOnPhone: monitorTTSOnPhone,
-                isSpeakerEnabled: isSpeaker
-            )
         } else if ttsAudioRxCount % 20 == 0 {
             let now = Date()
             let startedAt = ttsBinaryRxBatchStartAt ?? now
@@ -442,24 +508,26 @@ extension CallSessionController: WebSocketServiceDelegate {
                     print("[NOSOUND] tts_drain_BLOCKED: bleAudioStartAcked=false rxCount=\(ttsAudioRxCount) q=\(audioRouter.uplinkQueueCount())")
                 }
             }
+            if usesContinuousCloudDownlinkCallAudio && bleAudioStartAcked && isFirstTTSInCall && ttsAudioRxCount >= 32 {
+                isFirstTTSInCall = false
+                print("[TTS->BLE] continuous_call_first_tts_window_cleared rxCount=\(ttsAudioRxCount)")
+            }
         }
-        // If server sent binary before "tts" state "start", playback was never prepared and every frame
-        // would be dropped (isPlaying false or decoder nil). On first frame when monitoring on phone,
-        // ensure we prepare with fallback sample rate so this frame and the rest can play.
-        if ttsAudioRxCount == 1 && monitorTTSOnPhone {
-            let sampleRate = currentTTSSampleRate > 0 ? currentTTSSampleRate : ws.downstreamSampleRate
-            audioRouter.prepareForTTSStart(
-                monitorTTSOnPhone: monitorTTSOnPhone,
-                inputSource: inputSource,
-                scene: scene,
-                sampleRate: sampleRate,
-                isSpeaker: isSpeaker
-            )
-        }
+        // 下行准备：`scene=call` 连续流依赖 (1) 首包二进制 + `ensureSimMicCloudDownlinkPlaybackReady`（mic），
+        // 或 BLE 首包 `continuous_ble_downlink_prepare_first_binary`；(2) 管线异常清空时按帧补。
+        // 不再在 ttsAudioRxCount==1 时二次 prepare：会与 (1) 叠打，先 `stopPlayback` 再建，易造成下一帧 `!isPlaying` 与可感卡顿。
         audioRouter.consumeIncomingTTSAudioFrame(
             data: data,
             monitorTTSOnPhone: monitorTTSOnPhone
         )
+        // 首帧须先入解码/调度队列再动路由：此前在 playOpus 之前 reassert 扬声器曾触发
+        // AVAudioSession 变更，使下一帧 `ensure` 看到 `!isPlaying` 又走一遍 teardown。
+        if monitorTTSOnPhone, ttsAudioRxCount == 1 {
+            audioRouter.reassertSpeakerOnFirstTTSAudioFrameIfNeeded(
+                monitorTTSOnPhone: monitorTTSOnPhone,
+                isSpeakerEnabled: isSpeaker
+            )
+        }
     }
 
     func webSocketDidReceiveTTSSentence(text: String, isStart: Bool) {
@@ -483,6 +551,20 @@ extension CallSessionController: WebSocketServiceDelegate {
         guard isActiveController else { return }
         let sent = audioRouter.uplinkSentCounters()
         print("[NOSOUND] tts_stop: ttsRxCount=\(ttsAudioRxCount) ttsRxBytes=\(ttsAudioRxBytes) sentFrames=\(sent.sentFrames) sentBytes=\(sent.sentBytes) uplinkQ=\(audioRouter.uplinkQueueCount()) blePending=\(ble.pendingAudioWriteCount)")
+        let simMicCall = inputSource == .microphone && scene == .call && monitorTTSOnPhone
+        if simMicCall {
+            if usesContinuousCloudDownlinkCallAudio {
+                print("[CloudAudioProof] VERDICT_sim_mic_call_continuous tts_stop_json_only rx_session_frames=\(ttsAudioRxCount) note=per_utterance_verdict_disabled")
+            } else {
+                let explain: String
+                if ttsAudioRxCount == 0 {
+                    explain = "SILENCE_LIKELY_NOT_LOCAL_PLAYBACK: zero opus frames reached active CallSession for this utterance — compare log line VERDICT_ws_tts_span (if opus_frames_between_start_stop=0 → cloud/link did not send binary TTS)"
+                } else {
+                    explain = "CLOUD_DELIVERED_OPUS: frames=\(ttsAudioRxCount) reached session — if still no sound, search logs for LOCAL_playOpus_skipped_not_prepared or decode errors"
+                }
+                print("[CloudAudioProof] VERDICT_sim_mic_call_session \(explain)")
+            }
+        }
         // 通知缓冲区不再有新句子；缓冲区会继续流式输出剩余字符，
         // 排空后自动回调 onFinished 把文本固化到 messages。
         ttsStreamBuffer.markDone()
@@ -490,49 +572,63 @@ extension CallSessionController: WebSocketServiceDelegate {
         ttsStopCount += 1
         print("[MIC_CHAIN] tts_stop_rx: ttsStopCount=\(ttsStopCount) micGuard=\(micMutedByTTSGuard) wsListeningStarted=\(wsListeningStarted) monitorOnPhone=\(monitorTTSOnPhone)")
         logTTSTrace("tts_stop_rx")
-        print("[TTS->BLE] webSocketDidReceiveTTSStop: setting ttsStopped=true, q=\(audioRouter.uplinkQueueCount()) ttsStopCount=\(ttsStopCount)")
+        if usesContinuousCloudDownlinkCallAudio {
+            print("[TTS->BLE] webSocketDidReceiveTTSStop: continuous_call_mode ttsStopped=false q=\(audioRouter.uplinkQueueCount()) ttsStopCount=\(ttsStopCount)")
+        } else {
+            print("[TTS->BLE] webSocketDidReceiveTTSStop: setting ttsStopped=true, q=\(audioRouter.uplinkQueueCount()) ttsStopCount=\(ttsStopCount)")
+        }
         if monitorTTSOnPhone {
-            let frameDurationMs = max(1, ws.downstreamFrameDuration)
-            let baseGrace: TimeInterval = scene.isManualInteractionScene ? 8.0 : 4.0
-            let window = audioRouter.estimateTTSStopDrainWindow(
-                frameDurationMs: frameDurationMs,
-                baseGrace: baseGrace
-            )
-            print(String(format: "[CallSession] TTS stop: pending estimate=%.2f s timeout=%.2f s frameMs=%d",
-                         window.pendingEstimate, window.timeout, frameDurationMs))
+            if usesContinuousCloudDownlinkCallAudio {
+                print("[CallSession] TTS stop (continuous call): skip stop-after-drain; playback follows binary stream / WS end")
+            } else {
+                let frameDurationMs = max(1, ws.downstreamFrameDuration)
+                let baseGrace: TimeInterval = scene.isManualInteractionScene ? 8.0 : 4.0
+                let window = audioRouter.estimateTTSStopDrainWindow(
+                    frameDurationMs: frameDurationMs,
+                    baseGrace: baseGrace
+                )
+                print(String(format: "[CallSession] TTS stop: pending estimate=%.2f s timeout=%.2f s frameMs=%d",
+                             window.pendingEstimate, window.timeout, frameDurationMs))
 
-            // Keep playback alive until:
-            // 1) No new TTS binary frames for minSilenceAfterLastAudio seconds
-            //    (guards against jittery links where tts_stop arrives before tail frames).
-            // 2) The silence window covers at least one frame duration + small buffer
-            //    because scheduleBuffer completion fires when rendering STARTS not ends,
-            //    so hasPendingPlaybackBuffers() can return false while audio is still audible.
-            let frameSec = Double(frameDurationMs) / 1000.0
-            let minSilence = max(1.5, frameSec * 2 + 0.3)
-            audioRouter.scheduleTTSStopPlaybackAfterDrain(
-                timeout: window.timeout,
-                minSilenceAfterLastAudio: minSilence,
-                lastAudioRxAt: { [weak self] in
-                    self?.lastTtsAudioRxAt ?? .distantPast
-                },
-                isActive: { [weak self] in
-                    self?.isActiveController ?? false
-                },
-                onPlaybackStopped: { [weak self] in
-                    self?.releaseMicGuardForTTS()
-                }
-            )
-            print(String(format: "[CallSession] TTS stop drain: minSilence=%.2f s timeout=%.2f s", minSilence, window.timeout))
+                let frameSec = Double(frameDurationMs) / 1000.0
+                let minSilence = max(1.5, frameSec * 2 + 0.3)
+                audioRouter.scheduleTTSStopPlaybackAfterDrain(
+                    timeout: window.timeout,
+                    minSilenceAfterLastAudio: minSilence,
+                    lastAudioRxAt: { [weak self] in
+                        self?.lastTtsAudioRxAt ?? .distantPast
+                    },
+                    isActive: { [weak self] in
+                        self?.isActiveController ?? false
+                    },
+                    onPlaybackStopped: { [weak self] in
+                        self?.releaseMicGuardForTTS()
+                    }
+                )
+                print(String(format: "[CallSession] TTS stop drain: minSilence=%.2f s timeout=%.2f s", minSilence, window.timeout))
+            }
         } else {
             releaseMicGuardForTTS()
         }
         audioRouter.stopRecordingForConfigIfNeeded(scene: scene, wsListeningStarted: wsListeningStarted)
-        // Signal drain task to exit after draining remaining queue
-        audioRouter.setTTSStopped(true)
-        // First TTS has completed; subsequent TTS can use latency-bounding drops.
-        if inputSource == .ble {
+        audioRouter.setTTSStopped(!usesContinuousCloudDownlinkCallAudio)
+        if inputSource == .ble && !usesContinuousCloudDownlinkCallAudio {
             isFirstTTSInCall = false
         }
+    }
+
+    func webSocketDidReceiveFiller(id: String) {
+        guard isActiveController else { return }
+        // play_filler 是给 MCU 在通话中通过 HFP eSCO 播 mSBC blob，让对端在 AI think-gap
+        // 听到"嗯/啊"。模拟麦克风通话/分身配置等没有 BLE 通话的场景没有对端、没有 eSCO，
+        // 转过去只会让 MCU 回 result=-2（"无通话不能播 filler"），反过来触发 iOS 的
+        // `phone_handled_rejected → end()`，把会话整段拆掉。所以只在真实 BLE 通话里转发。
+        guard inputSource == .ble else {
+            print("[WS][filler] forward suppressed (no_ble_call inputSource=\(inputSource) scene=\(scene.rawValue)) id=\(id)")
+            return
+        }
+        print("[WS][filler] forward id=\(id) inputSource=ble scene=\(scene.rawValue)")
+        ble.sendCommand("play_filler", extra: ["filler_id": id], expectAck: false)
     }
 
     func webSocketDidReceiveToolCall(callId: String, name: String, arguments: [String: Any]) {

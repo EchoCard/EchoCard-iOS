@@ -108,6 +108,8 @@ class AudioService: NSObject, ObservableObject {
 
     // TTS 解码提交计数（仍在主线程，用于首帧延迟诊断打点）
     private var ttsLatencyDecodeSubmitCount: Int = 0
+    /// 下行 Opus 已到 `playOpusData` 但播放管线未就绪被丢弃的次数（用于与 `[CloudAudioProof] VERDICT_ws` 对照：云端有帧仍无声时查本地）。
+    private var ttsPlayOpusDroppedNotPrepared: Int = 0
 
     // 调度热路径：所有 buffer 调度和计数管理均在专用队列上运行，完全不涉及主线程
     private let playbackScheduler = PlaybackScheduler()
@@ -418,6 +420,23 @@ class AudioService: NSObject, ObservableObject {
     }
     
     // MARK: - 播放
+
+    /// 连续模拟通话：`isPlaying` 可能与「图仍在、仅引擎暂停或未置位」短暂不一致；若与当前下行参数一致则只恢复运行，避免 `preparePlayback` 开头的 `stopPlayback` 拆掉 BGM。
+    func tryResumeContinuousOpusPlaybackIfPossible(sampleRate: Int, playbackOnly: Bool) -> Bool {
+        if isPlaying, playbackFormat != nil, playbackNode != nil { return true }
+        guard playbackFormat != nil, let eng = playbackEngine, playbackNode != nil else { return false }
+        guard playSampleRate == sampleRate, isPlaybackOnlyMode == playbackOnly else { return false }
+        if !eng.isRunning {
+            do {
+                try eng.start()
+            } catch {
+                print("[CloudAudioProof] tryResumeContinuousOpusPlaybackIfPossible engine_start_failed err=\(error.localizedDescription)")
+                return false
+            }
+        }
+        isPlaying = true
+        return true
+    }
     
     /// 准备播放（收到 TTS start 时调用）
     /// 准备播放（收到 TTS start 时调用）
@@ -431,31 +450,52 @@ class AudioService: NSObject, ObservableObject {
         // Some servers can emit duplicate `tts start` events within one utterance.
         // If playback pipeline is already configured the same way, keep current
         // decoder/player to avoid cutting speech mid-sentence.
-        if isPlaying,
-           playSampleRate == sampleRate,
-           isPlaybackOnlyMode == playbackOnly {
-            return
+        if playSampleRate == sampleRate,
+           isPlaybackOnlyMode == playbackOnly,
+           playbackFormat != nil,
+           let engine = playbackEngine,
+           playbackNode != nil {
+            var reuseGraph = true
+            if !engine.isRunning {
+                do {
+                    try engine.start()
+                } catch {
+                    print("[Audio] preparePlayback reuse_graph engine start failed, rebuilding: \(error.localizedDescription)")
+                    reuseGraph = false
+                }
+            }
+            if reuseGraph {
+                isPlaying = true
+                print("[CloudAudioProof] preparePlayback reuse_graph_no_teardown sr=\(sampleRate) playbackOnly=\(playbackOnly)")
+                return
+            }
         }
 
         // 停止之前的播放（不影响录音引擎）
         stopPlayback()
-        
+        print("[CloudAudioProof] preparePlayback pipeline_teardown_then_rebuild sr=\(sampleRate) playbackOnly=\(playbackOnly)")
+
         playSampleRate = sampleRate
         isPlaybackOnlyMode = playbackOnly
         playbackDecodeGeneration += 1
         let decodeGeneration = playbackDecodeGeneration
 
         // 配置音频会话（如已匹配则避免重复 setCategory）
-        if playbackOnly {
-            // 纯播放模式：音量正常、走扬声器，适合 AI分身等仅播放 TTS 的场景
-            try configureAudioSession(category: .playback, mode: .default, options: [])
-        } else {
-            // 全双工模式：支持同时录音 + 播放，带回声消除
-            try configureAudioSession(
-                category: .playAndRecord,
-                mode: .videoChat,
-                options: [.defaultToSpeaker, .allowBluetoothHFP]
-            )
+        do {
+            if playbackOnly {
+                // 纯播放模式：音量正常、走扬声器，适合 AI分身等仅播放 TTS 的场景
+                try configureAudioSession(category: .playback, mode: .default, options: [])
+            } else {
+                // 全双工模式：支持同时录音 + 播放，带回声消除
+                try configureAudioSession(
+                    category: .playAndRecord,
+                    mode: .videoChat,
+                    options: [.defaultToSpeaker, .allowBluetoothHFP]
+                )
+            }
+        } catch {
+            print("[CloudAudioProof] preparePlayback_FAILED_configure_session sr=\(sampleRate) playbackOnly=\(playbackOnly) err=\(error.localizedDescription)")
+            throw error
         }
 
         // 创建播放格式: 24kHz mono (服务端下行格式)
@@ -513,6 +553,7 @@ class AudioService: NSObject, ObservableObject {
         playbackScheduler.scheduleWarmup()
 
         isPlaying = true
+        ttsPlayOpusDroppedNotPrepared = 0
         print("[Audio] 準備播放, 採樣率: \(sampleRate) playbackOnly=\(playbackOnly)")
         logCurrentAudioRoute(tag: "preparePlayback")
         logManualPlaybackLatency(
@@ -524,7 +565,13 @@ class AudioService: NSObject, ObservableObject {
 
     /// 接收并播放 Opus 音频数据
     func playOpusData(_ opusData: Data) {
-        guard isPlaying, playbackFormat != nil, playbackNode != nil else { return }
+        guard isPlaying, playbackFormat != nil, playbackNode != nil else {
+            ttsPlayOpusDroppedNotPrepared += 1
+            if ttsPlayOpusDroppedNotPrepared <= 10 || (ttsPlayOpusDroppedNotPrepared % 30) == 0 {
+                print("[CloudAudioProof] LOCAL_playOpus_skipped_not_prepared drops=\(ttsPlayOpusDroppedNotPrepared) bytes=\(opusData.count) isPlaying=\(isPlaying) hasFormat=\(playbackFormat != nil) hasNode=\(playbackNode != nil) → if drops>0 while WS shows opus_rx: LOCAL_AUDIO_PIPELINE")
+            }
+            return
+        }
         ttsLatencyDecodeSubmitCount += 1
         if ttsLatencyDecodeSubmitCount == 1 {
             logTTSLatencyStage("decode_submit", extra: "bytes=\(opusData.count)")

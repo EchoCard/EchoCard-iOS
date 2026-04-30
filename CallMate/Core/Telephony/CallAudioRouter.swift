@@ -312,6 +312,10 @@ final class CallAudioRouter {
         audio.isPlaying
     }
 
+    func tryResumeContinuousOpusPlaybackIfPossible(sampleRate: Int, playbackOnly: Bool) -> Bool {
+        audio.tryResumeContinuousOpusPlaybackIfPossible(sampleRate: sampleRate, playbackOnly: playbackOnly)
+    }
+
     func reassertSpeakerOnFirstTTSAudioFrameIfNeeded(
         monitorTTSOnPhone: Bool,
         isSpeakerEnabled: Bool
@@ -348,7 +352,11 @@ final class CallAudioRouter {
             let ttsPlaybackOnly = scene.isManualInteractionScene
             print("[CallAudioRouter] inputSource=\(inputSource) monitorOnPhone=\(monitorTTSOnPhone)")
 
-            try? audio.preparePlayback(sampleRate: sampleRate, playbackOnly: ttsPlaybackOnly)
+            do {
+                try audio.preparePlayback(sampleRate: sampleRate, playbackOnly: ttsPlaybackOnly)
+            } catch {
+                print("[CloudAudioProof] prepareForTTSStart_preparePlayback_FAILED sampleRate=\(sampleRate) playbackOnly=\(ttsPlaybackOnly) scene=\(scene.rawValue) err=\(error.localizedDescription)")
+            }
             if !ttsPlaybackOnly {
                 audio.enableSpeaker(isSpeaker)
             }

@@ -79,6 +79,11 @@ extension CallSessionController {
         false
     }
 
+    /// 通话中云端持续 Opus（背景+话术）：播放/转发由二进制驱动，`tts start/stop` 仅作文本/UI 边界。
+    var usesContinuousCloudDownlinkCallAudio: Bool {
+        scene == .call && (inputSource == .microphone || inputSource == .ble)
+    }
+
     func engageMicGuardForTTS() {
         guard shouldGuardMicDuringTTS else {
             print("[MIC_CHAIN] mic_guard_engage_skipped: shouldGuard=false inputSource=\(inputSource) scene=\(scene)")
