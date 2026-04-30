@@ -63,6 +63,9 @@ extension CallSessionController {
     }
 
     // MARK: - Outbound BLE diagnostics (`[OutboundDiag]`)
+    private enum OutboundDiag {
+        static let recentBleStatesMax = 16
+    }
 
     private func outboundBleStatePhaseLabel(_ phase: CallTransportCoordinator.BLECallStatePhase) -> String {
         switch phase {
@@ -81,7 +84,7 @@ extension CallSessionController {
     private func appendOutboundBleStateTrail(raw: String, norm: String, phase: CallTransportCoordinator.BLECallStatePhase) {
         guard shouldRecordOutboundBleStateTrail else { return }
         let item = "\(raw)|\(norm)|\(outboundBleStatePhaseLabel(phase))"
-        if outboundDiagRecentBleStates.count >= outboundDiagRecentBleStatesMax {
+        if outboundDiagRecentBleStates.count >= OutboundDiag.recentBleStatesMax {
             outboundDiagRecentBleStates.removeFirst()
         }
         outboundDiagRecentBleStates.append(item)

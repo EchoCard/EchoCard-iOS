@@ -260,9 +260,8 @@ final class CallSessionController: NSObject, ObservableObject {
     var outboundDiagEpoch: UInt64 = 0
     /// True after `call_state` is classified as `outgoingAnswered` for the current epoch.
     var outboundDiagReceivedOutgoingAnswered: Bool = false
-    /// Recent `raw|normalized|phase` tail for this epoch (max `outboundDiagRecentBleStatesMax`).
+    /// Recent `raw|normalized|phase` tail for this epoch (max 16 entries).
     var outboundDiagRecentBleStates: [String] = []
-    private let outboundDiagRecentBleStatesMax: Int = 16
     /// True when MCU already told us call is terminal (ended/rejected/phone_handled).
     /// In this case end() should NOT send hangup/audio_stop again.
     var remoteCallTerminalState: Bool = false
