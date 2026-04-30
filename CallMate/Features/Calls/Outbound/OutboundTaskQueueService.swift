@@ -165,6 +165,7 @@ final class OutboundTaskQueueService: ObservableObject {
             dialFailureCount: t.dialFailureCount,
             callFrequency: callFrequency.map { max(1, $0) } ?? t.callFrequency,
             redialMissed: redialMissed ?? t.redialMissed,
+            summary: t.summary,
             createdAt: t.createdAt
         )
         list[idx] = updated

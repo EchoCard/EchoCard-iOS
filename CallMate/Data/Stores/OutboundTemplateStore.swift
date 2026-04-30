@@ -18,29 +18,49 @@ enum OutboundTemplateLookup {
 }
 
 enum OutboundTemplateStore {
+    /// Parses `business_variables` from the JSON object that prefixes the first `#### ` section (plan §3.3).
+    static func parseBusinessVariables(from templateContent: String) -> [String: String] {
+        guard let sectionRange = templateContent.range(of: "#### ") else { return [:] }
+        let header = String(templateContent[..<sectionRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard header.hasPrefix("{"), let data = header.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let bv = obj["business_variables"] as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (key, value) in bv {
+            switch value {
+            case let s as String:
+                out[key] = s
+            case let n as NSNumber:
+                out[key] = n.stringValue
+            case is NSNull:
+                out[key] = ""
+            default:
+                if let sub = try? JSONSerialization.data(withJSONObject: value),
+                   let str = String(data: sub, encoding: .utf8) {
+                    out[key] = str
+                }
+            }
+        }
+        return out
+    }
+
     /// Extract the business-rules body from a full template (JSON schema header + `####` sections).
     ///
-    /// - `templateContent`: Raw `OutboundPromptTemplate.content` (JSON header + `#### 角色设定 ####`... body).
-    /// - `businessVariables`: Key-value pairs for `&{key}` substitution (usually from the JSON header's
-    ///   `business_variables` block).
-    /// - Returns: The text starting from the first `#### ` section, with `&{key}` replaced.
-    ///
-    /// Matches plan spec §3.3: skips the JSON schema header, takes `#### 角色设定 ####` to end,
-    /// substitutes `&{key}` with provided values.
+    /// - Returns: `nil` when there is no `#### ` markdown section (invalid template for call_outbound).
+    /// - Substitutes `&{key}` using `businessVariables` (merge with `parseBusinessVariables` for full §3.3 behavior).
     static func extractBusinessPrompt(
         from templateContent: String,
         businessVariables: [String: String]? = nil
-    ) -> String {
-        let sectionStart = templateContent.range(of: "#### ")?.lowerBound
-            ?? templateContent.startIndex
-        var body = String(templateContent[sectionStart...])
-
+    ) -> String? {
+        guard let sectionRange = templateContent.range(of: "#### ") else { return nil }
+        var body = String(templateContent[sectionRange.lowerBound...])
         if let vars = businessVariables {
             for (key, value) in vars {
                 body = body.replacingOccurrences(of: "&{\(key)}", with: value)
             }
         }
-        return body
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : body
     }
     /// Returns one element per persisted template. Element keys match v1 spec:
     /// `name`, `task_type`, `updated_at` (ISO8601 date).

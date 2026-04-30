@@ -7,24 +7,27 @@ import Foundation
 import SwiftData
 
 enum ChatSummaryService {
-    private struct ChatSummaryItem: Codable {
-        let session_id: String
-        let chat_summary: ChatSummaryPayload?
-        let token_count: Int?
-        let duration: Int?
-    }
-
     private struct ChatSummaryPayload: Codable {
         let title: String?
         let identity: String?
         let result: String?
         let summary: String?
-        // Backward compatibility for old payloads.
+        /// Backward compatibility for old payloads.
         let suggestion: String?
+        /// call_outbound structured summary (plan §5.2).
+        let outcome: String?
+        let actionRequired: String?
+
+        enum CodingKeys: String, CodingKey {
+            case title, identity, result, summary, suggestion, outcome
+            case actionRequired = "action_required"
+        }
     }
 
     private struct SummaryResult {
         let payload: ChatSummaryPayload
+        /// Raw `chat_summary` object JSON for `OutboundTask.summary`.
+        let rawSummaryJSON: String
         let tokenCount: Int?
         let duration: Int?
     }
@@ -36,10 +39,13 @@ enum ChatSummaryService {
         Task.detached(priority: .background) {
             print("[Summary] poll start session_id=\(sessionId)")
             let result = await pollChatSummary(sessionId: sessionId)
-            guard let result,
-                  let title = result.payload.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !title.isEmpty else {
+            guard let result else {
                 print("[Summary] poll finished: no summary session_id=\(sessionId)")
+                return
+            }
+            let title = resolvedTitle(from: result.payload)
+            guard !title.isEmpty else {
+                print("[Summary] poll finished: empty title session_id=\(sessionId)")
                 return
             }
             let identity = result.payload.identity?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -85,12 +91,28 @@ enum ChatSummaryService {
                             summaryDetail: responseResult ?? "",
                             callerName: identity
                         )
+
+                        if isOutbound, let taskId = call.outboundTaskID {
+                            OutboundTaskStore.mergeOutboundSummary(
+                                taskId: taskId,
+                                summaryJSON: result.rawSummaryJSON,
+                                outcome: result.payload.outcome
+                            )
+                        }
                     }
                 } catch {
                     print("[Summary] update failed session_id=\(sessionId) error=\(error.localizedDescription)")
                 }
             }
         }
+    }
+
+    private static func resolvedTitle(from payload: ChatSummaryPayload) -> String {
+        let t = payload.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !t.isEmpty { return t }
+        let r = payload.result?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !r.isEmpty { return r }
+        return payload.summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private static func pollChatSummary(sessionId: String) async -> SummaryResult? {
@@ -102,7 +124,6 @@ enum ChatSummaryService {
             if let result = await fetchChatSummary(sessionId: sessionId, useAuth: true) {
                 return result
             }
-            // If auth failed or no data, retry without auth once per interval
             if let result = await fetchChatSummary(sessionId: sessionId, useAuth: false) {
                 return result
             }
@@ -136,30 +157,49 @@ enum ChatSummaryService {
                 print("[Summary] http=\(http.statusCode) auth=\(useAuth ? "on" : "off")")
                 return nil
             }
-            let items = try JSONDecoder().decode([ChatSummaryItem].self, from: respData)
             print("[Summary] ←── raw response (\(useAuth ? "auth" : "no-auth")):\n\(String(data: respData, encoding: .utf8) ?? "<empty>")")
-            for item in items {
-                print("""
-[Summary] item: session_id=\(item.session_id) \
-token_count=\(item.token_count.map { "\($0)" } ?? "nil") \
-duration=\(item.duration.map { "\($0)" } ?? "nil") \
-title=\(item.chat_summary?.title ?? "nil") \
-identity=\(item.chat_summary?.identity ?? "nil") \
-result=\(item.chat_summary?.result ?? "nil")
-""")
-                if item.session_id == sessionId,
-                   let summary = item.chat_summary, summary.title?.isEmpty == false {
-                    return SummaryResult(
-                        payload: summary,
-                        tokenCount: item.token_count,
-                        duration: item.duration
-                    )
+            guard let arr = try JSONSerialization.jsonObject(with: respData) as? [[String: Any]] else {
+                print("[Summary] decode: top-level not array")
+                return nil
+            }
+            for item in arr {
+                guard (item["session_id"] as? String) == sessionId else { continue }
+                guard let summaryDict = item["chat_summary"] as? [String: Any] else { continue }
+                let payloadData = try JSONSerialization.data(withJSONObject: summaryDict)
+                guard let payload = try? JSONDecoder().decode(ChatSummaryPayload.self, from: payloadData) else {
+                    print("[Summary] decode ChatSummaryPayload failed session_id=\(sessionId)")
+                    continue
                 }
+                let title = resolvedTitle(from: payload)
+                guard !title.isEmpty else { continue }
+                let rawString = String(data: payloadData, encoding: .utf8) ?? "{}"
+                let tokenCount = Self.intField(item["token_count"])
+                let duration = Self.intField(item["duration"])
+                print("""
+[Summary] item: session_id=\(sessionId) \
+token_count=\(tokenCount.map { "\($0)" } ?? "nil") \
+duration=\(duration.map { "\($0)" } ?? "nil") \
+title=\(payload.title ?? "nil") \
+outcome=\(payload.outcome ?? "nil") \
+result=\(payload.result ?? "nil")
+""")
+                return SummaryResult(
+                    payload: payload,
+                    rawSummaryJSON: rawString,
+                    tokenCount: tokenCount,
+                    duration: duration
+                )
             }
         } catch {
             print("[Summary] fetch failed auth=\(useAuth ? "on" : "off") error=\(error.localizedDescription)")
             return nil
         }
+        return nil
+    }
+
+    private static func intField(_ any: Any?) -> Int? {
+        if let i = any as? Int { return i }
+        if let n = any as? NSNumber { return n.intValue }
         return nil
     }
 }

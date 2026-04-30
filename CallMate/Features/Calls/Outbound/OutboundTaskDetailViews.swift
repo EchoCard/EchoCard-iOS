@@ -107,6 +107,24 @@ struct OutboundTaskDetailView: View {
 
     private func t(_ zh: String, _ en: String) -> String { language == .zh ? zh : en }
 
+    /// Prefer human-readable fields from server summary JSON (plan §5.2).
+    private static func displayOutboundSummary(json: String) -> String {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return json
+        }
+        if let s = obj["summary"] as? String, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return s
+        }
+        if let r = obj["result"] as? String, !r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return r
+        }
+        if let t = obj["title"] as? String, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return t
+        }
+        return json
+    }
+
     private var callByPhone: [String: CallLog] {
         let dict = Dictionary(calls.map { ($0.phone, $0) }, uniquingKeysWith: { lhs, rhs in
             lhs.startedAt > rhs.startedAt ? lhs : rhs
@@ -200,6 +218,19 @@ struct OutboundTaskDetailView: View {
                         }
 
                         Divider()
+
+                        if let raw = task.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+                            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                Text(t("通话摘要", "Call summary"))
+                                    .font(DS.Typography.caption.weight(.semibold))
+                                    .foregroundColor(AppColors.textSecondary)
+                                Text(Self.displayOutboundSummary(json: raw))
+                                    .font(DS.Typography.body)
+                                    .foregroundColor(AppColors.textPrimary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, AppSpacing.xs)
+                        }
 
                         Button {
                             showPromptDetail = true

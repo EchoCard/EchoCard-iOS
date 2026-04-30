@@ -185,6 +185,19 @@ enum OutboundTaskStatus: String, Codable {
     /// 外呼未接通（无真人接听，仅系统提示音）。
     case notConnected
 
+    /// Maps server `call_outbound` summary `outcome` (plan §5.2).
+    static func fromSummaryOutcome(_ raw: String?) -> OutboundTaskStatus? {
+        guard let o = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !o.isEmpty else { return nil }
+        switch o {
+        case "success": return .completed
+        case "partial": return .partial
+        case "failed": return .failed
+        case "pending": return .pending
+        case "not_connected": return .notConnected
+        default: return nil
+        }
+    }
+
     func title(language: Language) -> String {
         switch self {
         case .scheduled: return language == .zh ? "已定时" : "Scheduled"
@@ -243,6 +256,22 @@ enum OutboundTaskStore {
             print("[OutboundTaskStore] load failed: \(error.localizedDescription)")
             return []
         }
+    }
+
+    /// Persists backend summary JSON and optionally overrides task status from `outcome` (plan §5).
+    static func mergeOutboundSummary(taskId: UUID, summaryJSON: String, outcome: String?) {
+        var list = load()
+        guard let idx = list.firstIndex(where: { $0.id == taskId }) else {
+            print("[OutboundSummary] merge skip: no task id=\(taskId)")
+            return
+        }
+        list[idx].summary = summaryJSON
+        if let mapped = OutboundTaskStatus.fromSummaryOutcome(outcome) {
+            list[idx].status = mapped
+        }
+        save(list)
+        print("[OutboundSummary] merged task=\(taskId) outcome=\(outcome ?? "nil") len=\(summaryJSON.count)")
+        NotificationCenter.default.post(name: .outboundTasksSummaryUpdated, object: taskId)
     }
 }
 
@@ -317,4 +346,6 @@ enum OutboundTaskBGScheduler {
 
 extension Notification.Name {
     static let outboundTaskDue = Notification.Name("outboundTaskDue")
+    /// Posted after `OutboundTaskStore.mergeOutboundSummary` updates disk.
+    static let outboundTasksSummaryUpdated = Notification.Name("outboundTasksSummaryUpdated")
 }

@@ -354,6 +354,13 @@ struct OutboundCallsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .outboundTaskDue)) { _ in
             executeDueScheduledTasks()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .outboundTasksSummaryUpdated)) { _ in
+            tasks = OutboundTaskStore.load()
+            if let sel = selectedTaskDetail,
+               let fresh = OutboundTaskStore.load().first(where: { $0.id == sel.id }) {
+                selectedTaskDetail = fresh
+            }
+        }
         .onChange(of: queueService.runningTaskIds.count) { _, _ in
             tasks = OutboundTaskStore.load()
         }

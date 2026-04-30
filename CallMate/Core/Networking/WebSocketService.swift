@@ -253,9 +253,6 @@ class WebSocketService: NSObject, ObservableObject {
     private let initAndEvaluationPromptResourceName = "config"
     private let promptResourceExtension = "txt"
     private let promptSubdirectory = "Prompts"
-    private let callEndMarkerToken = "✿END✿"
-    /// 过早输出 ✿END✿ 会触发 `webSocketDidReceiveAIHangup()`。旧提示「判断要挂断就加」易误触发；须限定为真正终局回合。
-    private let callEndMarkerInstruction = "【✿END✿】仅当本轮之后不应再由你开口、且通话可以结束时，才在本轮回复末尾追加 ✿END✿（例：对方已挂断；对方明确要求结束且你无需再补充；任务已完全达成且只剩简短道别）。不要在开场寒暄、信息未问全、尚在协商或追问、等待对方回应、多轮任务中途追加 ✿END✿。"
 
     
     // MARK: - 状态
@@ -757,12 +754,12 @@ class WebSocketService: NSObject, ObservableObject {
         initiate["scene"] = helloScene.rawValue
 
         // Prompt rule:
-        // - outbound call scene uses task template prompt override
-        // - outbound chat scene always loads from outbound_call.txt
-        // - other scenes do not send prompt by default
+        // - scene=call: inbound / legacy prompt override（✿END✿ 由服务端模板约束，客户端不拼接 plan §6.2）
+        // - scene=outbound_chat: bundle prompt 资源
+        // - 其他场景默认不发 prompt
         if helloScene == .call {
-            if let prompt = callHelloPromptOverride {
-                initiate["prompt"] = appendCallEndMarkerInstructionIfNeeded(to: prompt)
+            if let prompt = callHelloPromptOverride?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
+                initiate["prompt"] = prompt
             }
             if let rid = helloApnsRequestId?.trimmingCharacters(in: .whitespacesAndNewlines), !rid.isEmpty {
                 initiate["apns_request_id"] = rid
@@ -836,12 +833,16 @@ class WebSocketService: NSObject, ObservableObject {
             // call_outbound scene (plan/2026-04-30-call-outbound-client-delta.md §3.2):
             // business_prompt 必填 — 从 callHelloPromptOverride 提取业务规则正文。
             if let prompt = callHelloPromptOverride {
-                let businessPrompt = OutboundTemplateStore.extractBusinessPrompt(
+                let bizVars = OutboundTemplateStore.parseBusinessVariables(from: prompt)
+                if let businessPrompt = OutboundTemplateStore.extractBusinessPrompt(
                     from: prompt,
-                    businessVariables: nil
-                )
-                templateVars["business_prompt"] = businessPrompt
-                print("[WS] hello call_outbound business_prompt len=\(businessPrompt.count)")
+                    businessVariables: bizVars
+                ) {
+                    templateVars["business_prompt"] = businessPrompt
+                    print("[WS] hello call_outbound business_prompt len=\(businessPrompt.count) bizVarKeys=\(bizVars.keys.sorted())")
+                } else {
+                    print("[WS] ERROR call_outbound: missing #### sections in template — business_prompt omitted")
+                }
             }
             // 外呼元数据
             if let ctx = outboundHelloContext {
@@ -1566,16 +1567,6 @@ class WebSocketService: NSObject, ObservableObject {
         }
         cachedPromptsByResourceName[resourceName] = prompt
         return prompt
-    }
-
-    @MainActor
-    private func appendCallEndMarkerInstructionIfNeeded(to prompt: String) -> String {
-        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else { return prompt }
-        if trimmedPrompt.contains(callEndMarkerToken) {
-            return trimmedPrompt
-        }
-        return "\(trimmedPrompt)\n\n\(callEndMarkerInstruction)"
     }
 
     private func parseToolArguments(_ rawArguments: Any?) -> [String: Any] {
