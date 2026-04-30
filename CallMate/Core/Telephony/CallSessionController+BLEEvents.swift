@@ -104,7 +104,7 @@ extension CallSessionController {
     }
 
     private func logOutboundDiagSnapshot(note: String) {
-        let fallbackDisabled = UserDefaults.standard.bool(forKey: "callmate.outbound.disable_audio_streaming_ws_fallback")
+        let fallbackDisabled = outboundDisableAudioStreamingWsFallback
         let boundSid = transportCoordinator.diagnosticBleCallSIDForLogging().map { String($0) } ?? "nil"
         let trail = outboundDiagRecentBleStates.joined(separator: " ; ")
         print(
@@ -337,7 +337,7 @@ extension CallSessionController {
             // outgoing_answered to avoid sending hello before callHelloPromptOverride
             // is set (which would cause the prompt to be missing).
             print("[OutboundRec] call_state(active): outgoing call, deferring WS connect and audio_start until outgoing_answered")
-            print("[OutboundDiag] defer_ws_until_outgoing_answered epoch=\(outboundDiagEpoch) seen_outgoing_answered=\(outboundDiagReceivedOutgoingAnswered) disable_audio_streaming_ws_fallback_ud=\(UserDefaults.standard.bool(forKey: "callmate.outbound.disable_audio_streaming_ws_fallback"))")
+            print("[OutboundDiag] defer_ws_until_outgoing_answered epoch=\(outboundDiagEpoch) seen_outgoing_answered=\(outboundDiagReceivedOutgoingAnswered) disable_audio_streaming_ws_fallback_ud=\(outboundDisableAudioStreamingWsFallback)")
             activateOutgoingCallIfNeeded()
         }
     }
@@ -395,10 +395,10 @@ extension CallSessionController {
     }
 
     /// When SCO is up (`audio_streaming`) but ANCS never delivers `outgoing_answered`, still bring up call_outbound AI.
-    /// Disable with UserDefaults `callmate.outbound.disable_audio_streaming_ws_fallback=true` (grep `[OutboundDiag]` for evidence).
+    /// Suppressed when `outboundDisableAudioStreamingWsFallback` is true (default). Set UserDefaults `callmate.outbound.disable_audio_streaming_ws_fallback` = false to allow.
     private func handleOutboundCloudOnAudioStreamingIfNeeded() {
         guard inputSource == .ble else { return }
-        let fallbackDisabled = UserDefaults.standard.bool(forKey: "callmate.outbound.disable_audio_streaming_ws_fallback")
+        let fallbackDisabled = outboundDisableAudioStreamingWsFallback
         print("[OutboundDiag] audio_streaming_handler_enter fallback_disabled_ud=\(fallbackDisabled) seen_outgoing_answered=\(outboundDiagReceivedOutgoingAnswered)")
         logOutboundDiagSnapshot(note: "audio_streaming_handler_enter")
         guard !ws.isConnectedInCallOutboundScene else {

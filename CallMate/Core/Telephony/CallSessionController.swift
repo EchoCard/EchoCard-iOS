@@ -262,6 +262,15 @@ final class CallSessionController: NSObject, ObservableObject {
     var outboundDiagReceivedOutgoingAnswered: Bool = false
     /// Recent `raw|normalized|phase` tail for this epoch (max 16 entries).
     var outboundDiagRecentBleStates: [String] = []
+    /// When true, `call_state(audio_streaming)` does not start `call_outbound` WS (wait for `outgoing_answered` only).
+    /// No UserDefaults entry defaults to **true** (fallback off). Set `callmate.outbound.disable_audio_streaming_ws_fallback` = `false` to allow fallback (e.g. old MCU without `outgoing_answered`).
+    var outboundDisableAudioStreamingWsFallback: Bool {
+        let key = "callmate.outbound.disable_audio_streaming_ws_fallback"
+        if UserDefaults.standard.object(forKey: key) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: key)
+    }
     /// True when MCU already told us call is terminal (ended/rejected/phone_handled).
     /// In this case end() should NOT send hangup/audio_stop again.
     var remoteCallTerminalState: Bool = false

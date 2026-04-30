@@ -61,8 +61,8 @@ extension CallSessionController {
         outboundDiagEpoch += 1
         outboundDiagReceivedOutgoingAnswered = false
         outboundDiagRecentBleStates.removeAll()
-        let fallbackOff = UserDefaults.standard.bool(forKey: "callmate.outbound.disable_audio_streaming_ws_fallback")
-        print("[OutboundDiag] prepareForOutboundDial epoch=\(outboundDiagEpoch) disable_audio_streaming_ws_fallback=\(fallbackOff) (UserDefaults; false=allow fallback)")
+        let fallbackOff = outboundDisableAudioStreamingWsFallback
+        print("[OutboundDiag] prepareForOutboundDial epoch=\(outboundDiagEpoch) disable_audio_streaming_ws_fallback=\(fallbackOff) (default true=no key; false=allow streaming fallback)")
         /* MCU opens a new call session + sid on dial; BLE `dialPhoneNumber` only clears
          * `CallMateBLEClient.currentCallSID`. `CallTransportCoordinator.currentBLECallSID`
          * can still hold the *previous* call's sid — `sendCallCommand` prefers the coordinator,
