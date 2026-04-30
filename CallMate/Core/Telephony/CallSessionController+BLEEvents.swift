@@ -62,14 +62,64 @@ extension CallSessionController {
             .store(in: &cancellables)
     }
 
+    // MARK: - Outbound BLE diagnostics (`[OutboundDiag]`)
+
+    private func outboundBleStatePhaseLabel(_ phase: CallTransportCoordinator.BLECallStatePhase) -> String {
+        switch phase {
+        case .active: return "active"
+        case .outgoingAnswered: return "outgoingAnswered"
+        case .phoneHandled: return "phoneHandled"
+        case let .terminal(n): return "terminal(\(n))"
+        case let .other(n): return "other(\(n))"
+        }
+    }
+
+    private var shouldRecordOutboundBleStateTrail: Bool {
+        pendingOutboundTaskID != nil || activeOutboundTaskID != nil || outboundCallId != nil
+    }
+
+    private func appendOutboundBleStateTrail(raw: String, norm: String, phase: CallTransportCoordinator.BLECallStatePhase) {
+        guard shouldRecordOutboundBleStateTrail else { return }
+        let item = "\(raw)|\(norm)|\(outboundBleStatePhaseLabel(phase))"
+        if outboundDiagRecentBleStates.count >= outboundDiagRecentBleStatesMax {
+            outboundDiagRecentBleStates.removeFirst()
+        }
+        outboundDiagRecentBleStates.append(item)
+    }
+
+    private func logOutboundBleCallStateDiag(
+        raw: String,
+        norm: String,
+        phase: CallTransportCoordinator.BLECallStatePhase
+    ) {
+        guard inputSource == .ble else { return }
+        let boundSid = transportCoordinator.diagnosticBleCallSIDForLogging().map { String($0) } ?? "nil"
+        let trail = outboundDiagRecentBleStates.joined(separator: " ; ")
+        print(
+            "[OutboundDiag] ble_call_state raw=\"\(raw)\" norm=\"\(norm)\" phase=\(outboundBleStatePhaseLabel(phase)) epoch=\(outboundDiagEpoch) seen_outgoing_answered=\(outboundDiagReceivedOutgoingAnswered) status=\(status) outboundCallId=\(outboundCallId?.uuidString ?? "nil") activeTask=\(activeOutboundTaskID != nil) pendingTask=\(pendingOutboundTaskID != nil) ws.conn=\(ws.isConnected) ws.sid=\(ws.sessionId != nil) ws.callOutbound=\(ws.isConnectedInCallOutboundScene) ws.nonCallBusy=\(ws.isOccupiedByNonCallWebsocketScene) bleCallActive=\(bleCallActive) bleAudAck=\(bleAudioStartAcked) bleSid=\(boundSid) trail=[\(trail)]"
+        )
+    }
+
+    private func logOutboundDiagSnapshot(note: String) {
+        let fallbackDisabled = UserDefaults.standard.bool(forKey: "callmate.outbound.disable_audio_streaming_ws_fallback")
+        let boundSid = transportCoordinator.diagnosticBleCallSIDForLogging().map { String($0) } ?? "nil"
+        let trail = outboundDiagRecentBleStates.joined(separator: " ; ")
+        print(
+            "[OutboundDiag] snapshot note=\(note) epoch=\(outboundDiagEpoch) seen_outgoing_answered=\(outboundDiagReceivedOutgoingAnswered) disable_audio_streaming_ws_fallback=\(fallbackDisabled) status=\(status) outboundCallId=\(outboundCallId?.uuidString ?? "nil") activePromptLen=\(activeOutboundPrompt?.count ?? -1) ws.callOutbound=\(ws.isConnectedInCallOutboundScene) ws.conn=\(ws.isConnected) bleSid=\(boundSid) trail=[\(trail)]"
+        )
+    }
+
     func handleBLECallState(_ state: String) {
         // During latency test, only LatencyTestRunner should react to call_state (wait for active → SCO).
         if ble.latencyTestEchoMode {
             return
         }
+        let normalizedForDiag = transportCoordinator.normalizeBLECallState(state)
+        let callStatePhase = transportCoordinator.classifyBLECallState(state)
         print("[NOSOUND] call_state: \"\(state)\" bleCallActive=\(bleCallActive) acked=\(bleAudioStartAcked) wsListening=\(wsListeningStarted) wsSession=\(ws.sessionId != nil)")
         print("[OutboundRec] BLE callState received: \"\(state)\" status=\(status) outboundCallId=\(outboundCallId?.uuidString ?? "nil")")
-        let callStatePhase = transportCoordinator.classifyBLECallState(state)
+        logOutboundBleCallStateDiag(raw: state, norm: normalizedForDiag, phase: callStatePhase)
+        appendOutboundBleStateTrail(raw: state, norm: normalizedForDiag, phase: callStatePhase)
         if handleCallStateDuringContactPassthrough(
             state: state,
             phase: callStatePhase
@@ -87,10 +137,10 @@ extension CallSessionController {
             }
             handleBLECallEndPlan(endPlan)
         case .other(let normalized):
-            // iOS ANCS / MCU 有时只给到 `active` + `audio_streaming`，迟迟不出现 `outgoing_answered`。
-            // 此时若只等 `outgoing_answered`，`call_outbound` WS 永远不会建，`toWS=0`、听筒无 AI 声。
             if normalized == "audio_streaming" {
                 handleOutboundCloudOnAudioStreamingIfNeeded()
+            } else if shouldRecordOutboundBleStateTrail {
+                print("[OutboundDiag] ble_call_state other(norm=\"\(normalized)\") — not handled; if this is callee-answered, MCU must emit normalized \"outgoing_answered\" (see CallTransportCoordinator.classifyBLECallState)")
             }
         }
     }
@@ -284,6 +334,7 @@ extension CallSessionController {
             // outgoing_answered to avoid sending hello before callHelloPromptOverride
             // is set (which would cause the prompt to be missing).
             print("[OutboundRec] call_state(active): outgoing call, deferring WS connect and audio_start until outgoing_answered")
+            print("[OutboundDiag] defer_ws_until_outgoing_answered epoch=\(outboundDiagEpoch) seen_outgoing_answered=\(outboundDiagReceivedOutgoingAnswered) disable_audio_streaming_ws_fallback_ud=\(UserDefaults.standard.bool(forKey: "callmate.outbound.disable_audio_streaming_ws_fallback"))")
             activateOutgoingCallIfNeeded()
         }
     }
@@ -291,6 +342,8 @@ extension CallSessionController {
     /// Connects `scene=call_outbound` WS (unless already live) and sends MCU `audio_start` + retry loop.
     /// Used from `outgoing_answered` and from `call_state(audio_streaming)` when `outgoing_answered` is missing.
     func runOutboundCloudWsAndAudioStart(wsConnectReason: String) {
+        print("[OutboundDiag] runOutboundCloudWsAndAudioStart enter reason=\(wsConnectReason) epoch=\(outboundDiagEpoch) seen_outgoing_answered=\(outboundDiagReceivedOutgoingAnswered) net=\(permissions.networkStatus == .satisfied)")
+        logOutboundDiagSnapshot(note: "runOutboundCloudWsAndAudioStart:\(wsConnectReason)")
         switch transportCoordinator.planBLEOutgoingAnsweredWS(
             networkSatisfied: permissions.networkStatus == .satisfied
         ) {
@@ -339,13 +392,33 @@ extension CallSessionController {
     }
 
     /// When SCO is up (`audio_streaming`) but ANCS never delivers `outgoing_answered`, still bring up call_outbound AI.
+    /// Disable with UserDefaults `callmate.outbound.disable_audio_streaming_ws_fallback=true` (grep `[OutboundDiag]` for evidence).
     private func handleOutboundCloudOnAudioStreamingIfNeeded() {
         guard inputSource == .ble else { return }
-        guard !ws.isConnectedInCallOutboundScene else { return }
-        guard outboundCallId != nil else { return }
+        let fallbackDisabled = UserDefaults.standard.bool(forKey: "callmate.outbound.disable_audio_streaming_ws_fallback")
+        print("[OutboundDiag] audio_streaming_handler_enter fallback_disabled_ud=\(fallbackDisabled) seen_outgoing_answered=\(outboundDiagReceivedOutgoingAnswered)")
+        logOutboundDiagSnapshot(note: "audio_streaming_handler_enter")
+        guard !ws.isConnectedInCallOutboundScene else {
+            print("[OutboundDiag] audio_streaming: already in call_outbound WS — skip handler")
+            return
+        }
+        guard outboundCallId != nil else {
+            print("[OutboundDiag] audio_streaming: early_return outboundCallId=nil (not in outbound session yet)")
+            return
+        }
         let trimmedActive = activeOutboundPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let hasCtx = activeOutboundTaskID != nil || !trimmedActive.isEmpty
-        guard hasCtx else { return }
+        guard hasCtx else {
+            print("[OutboundDiag] audio_streaming: early_return no_outbound_task_or_prompt (manual/non-app call?)")
+            return
+        }
+        if fallbackDisabled {
+            print(
+                "[OutboundDiag] audio_streaming: FALLBACK_SUPPRESSED — no call_outbound WS will start until `outgoing_answered`. If you never see `[OutboundDiag] outgoing_answered_rx`, MCU likely never emits `outgoing_answered` for this dial; compare firmware ANCS→BLE mapping."
+            )
+            logOutboundDiagSnapshot(note: "audio_streaming_fallback_suppressed")
+            return
+        }
         print("[OutboundRec] call_state(audio_streaming): fallback outbound cloud WS (outgoing_answered missing or WS not call_outbound)")
         bleCallActive = true
         applyPhoneIDContextForWS()
@@ -363,6 +436,9 @@ extension CallSessionController {
          * MCU detected ANCS "当前通话" — the callee has answered the outgoing
          * call. Now connect to AI cloud and start audio.
          */
+        outboundDiagReceivedOutgoingAnswered = true
+        print("[OutboundDiag] outgoing_answered_rx epoch=\(outboundDiagEpoch) outboundCallId=\(outboundCallId?.uuidString ?? "nil")")
+        logOutboundDiagSnapshot(note: "outgoing_answered_rx")
         print("[OutboundRec] call_state(outgoing_answered): callee picked up, connecting WS and starting audio")
         print("[PromptTrace] outgoing_answered ENTRY: activePrompt=\(activeOutboundPrompt == nil ? "nil" : "\(activeOutboundPrompt!.count)chars") pendingPrompt=\(pendingOutboundPrompt == nil ? "nil" : "\(pendingOutboundPrompt!.count)chars")")
         print("[OutboundRec][TaskID] outgoing_answered ENTRY: activeOutboundTaskID=\(activeOutboundTaskID?.uuidString ?? "⚠️ NIL") outboundCallId=\(outboundCallId?.uuidString ?? "⚠️ NIL — call_state(active) may have been missed!")")

@@ -254,6 +254,15 @@ final class CallSessionController: NSObject, ObservableObject {
     /// (e.g. user hangs up while phone is still ringing, before call_state(active)).
     /// Allows waitForOutboundCallStart to exit early instead of hanging for 60 s.
     var outboundCallAborted: Bool = false
+
+    // MARK: - Outbound BLE diagnostics (grep `[OutboundDiag]`)
+    /// Increments each `prepareForOutboundDial()` — correlates one dial with subsequent `call_state` lines.
+    var outboundDiagEpoch: UInt64 = 0
+    /// True after `call_state` is classified as `outgoingAnswered` for the current epoch.
+    var outboundDiagReceivedOutgoingAnswered: Bool = false
+    /// Recent `raw|normalized|phase` tail for this epoch (max `outboundDiagRecentBleStatesMax`).
+    var outboundDiagRecentBleStates: [String] = []
+    private let outboundDiagRecentBleStatesMax: Int = 16
     /// True when MCU already told us call is terminal (ended/rejected/phone_handled).
     /// In this case end() should NOT send hangup/audio_stop again.
     var remoteCallTerminalState: Bool = false

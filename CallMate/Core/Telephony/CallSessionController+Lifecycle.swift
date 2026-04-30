@@ -610,6 +610,7 @@ extension CallSessionController {
         let callId = UUID()
         outboundCallId = callId
         outboundCallStartedAt = Date()
+        print("[OutboundDiag] outbound_session_started epoch=\(outboundDiagEpoch) outboundCallId=\(callId.uuidString) seen_outgoing_answered=\(outboundDiagReceivedOutgoingAnswered)")
         print("[OutboundRec][TaskID] activateOutgoing: pendingOutboundTaskID=\(pendingOutboundTaskID?.uuidString ?? "⚠️ NIL") → promoting to activeOutboundTaskID")
         activeOutboundTaskID = pendingOutboundTaskID
         activeOutboundPrompt = pendingOutboundPrompt

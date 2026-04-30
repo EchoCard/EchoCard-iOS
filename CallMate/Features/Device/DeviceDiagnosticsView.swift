@@ -16,6 +16,8 @@ struct DeviceDiagnosticsView: View {
     /// mute gate 是否造成对方听 TTS 顿挫）。默认 false = 保持 filler 转发（跟发布版本
     /// 一致）；用户在 UI 里打开 toggle 才跳过转发，做 A/B 对比。
     @AppStorage("callmate.debug_disable_filler_forward") private var disableFillerForward = false
+    /// 外呼诊断：为 true 时禁止 `audio_streaming` 触发 `call_outbound`（仅等 `outgoing_answered`）。默认 false。配合控制台 grep `[OutboundDiag]`。
+    @AppStorage("callmate.outbound.disable_audio_streaming_ws_fallback") private var disableOutboundAudioStreamingWsFallback = false
     @State private var showCrashLog = false
     @State private var lastSetMac: String? = nil
     @State private var isMacWriting = false
@@ -143,6 +145,17 @@ struct DeviceDiagnosticsView: View {
                                 subtitle: t("通话中不转发 play_filler（A/B 对方听 TTS 顿挫）",
                                             "Skip play_filler forwarding (A/B for remote TTS stutter)"),
                                 isOn: $disableFillerForward
+                            )
+
+                            cardDivider
+
+                            diagToggleRow(
+                                icon: "phone.arrow.up.right",
+                                iconColor: Color(hex: "34C759"),
+                                title: t("禁用外呼 audio_streaming 云链后备", "Disable outbound audio_streaming WS fallback"),
+                                subtitle: t("仅用于对照 MCU 是否发 outgoing_answered；关闭后备可能无 AI 声。日志搜 OutboundDiag",
+                                            "For MCU outgoing_answered diagnosis only; may silence AI. Grep [OutboundDiag]"),
+                                isOn: $disableOutboundAudioStreamingWsFallback
                             )
 
                             cardDivider

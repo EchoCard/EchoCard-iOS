@@ -115,6 +115,11 @@ final class CallTransportCoordinator {
         print("[CallSession] bind sid=\(call.sid ?? 0) uid=\(call.uid)")
     }
 
+    /// For `[OutboundDiag]` logs only — correlates App command sid with MCU `call_state`.
+    func diagnosticBleCallSIDForLogging() -> UInt32? {
+        currentBLECallSID
+    }
+
     func clearCallSessionSID(reason: String) {
         if let sid = currentBLECallSID {
             print("[CallSession] clear sid=\(sid) reason=\(reason)")
