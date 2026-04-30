@@ -63,6 +63,15 @@ extension CallSessionController {
          * can still hold the *previous* call's sid — `sendCallCommand` prefers the coordinator,
          * so `audio_start` would carry a stale sid and fail `protocol_validate_cmd_sid` (-7). */
         clearCallSessionSID(reason: "outbound_dial_prepare")
+        // 与 AI 分身（`scene=update_config`）等共用 [WebSocketService.shared]：不断开则外呼全程
+        // `wsSession=true` 但实际仍是配置会话，`outgoing_answered` 时无法切到 `call_outbound`（表现为无 AI 声）。
+        Self.activeControllerId = controllerId
+        Self.activeController = self
+        ws.addDelegate(self)
+        if ws.isOccupiedByNonCallWebsocketScene {
+            print("[OutboundRec] prepareForOutboundDial: disconnect non-call WS so outbound can use call_outbound")
+            ws.disconnect()
+        }
         print("[OutboundRec] prepareForOutboundDial: status=\(status) bgActive=\(bleBackgroundSupportActive)")
         startBLEBackgroundSupport(reason: "outbound_dial_prepare")
     }

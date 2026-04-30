@@ -270,6 +270,10 @@ class WebSocketService: NSObject, ObservableObject {
     @MainActor var isConnectedInCallOutboundScene: Bool {
         isConnected && helloScene == .callOutbound && sessionId != nil
     }
+    /// AI 分身 / 配置向导等占用 `WebSocketService.shared` 时，外呼无法在同一 socket 上发 `call_outbound` hello。
+    @MainActor var isOccupiedByNonCallWebsocketScene: Bool {
+        (isConnected || isConnecting) && helloScene != .call && helloScene != .callOutbound
+    }
     @MainActor private var callHelloPromptOverride: String?
     /// 外呼场景 hello.initiate.template_vars 元数据。
     /// 与 `callHelloPromptOverride` 同时设定，仅 `.callOutbound` 场景使用。
@@ -453,6 +457,7 @@ class WebSocketService: NSObject, ObservableObject {
         lastConnectAttemptAt = Date()
         self.audioFormat = audioFormat
         self.helloScene = scene
+        cloudProofSceneSnapshot = scene.rawValue
         connectPreparationTask?.cancel()
         let connectAttemptID = UUID()
         self.connectAttemptID = connectAttemptID
@@ -834,15 +839,32 @@ class WebSocketService: NSObject, ObservableObject {
             // business_prompt 必填 — 从 callHelloPromptOverride 提取业务规则正文。
             if let prompt = callHelloPromptOverride {
                 let bizVars = OutboundTemplateStore.parseBusinessVariables(from: prompt)
-                if let businessPrompt = OutboundTemplateStore.extractBusinessPrompt(
+                let businessPrompt: String
+                let usedLegacyBody: Bool
+                if let extracted = OutboundTemplateStore.extractBusinessPrompt(
                     from: prompt,
                     businessVariables: bizVars
                 ) {
-                    templateVars["business_prompt"] = businessPrompt
+                    businessPrompt = extracted
+                    usedLegacyBody = false
                     print("[WS] hello call_outbound business_prompt len=\(businessPrompt.count) bizVarKeys=\(bizVars.keys.sorted())")
                 } else {
-                    print("[WS] ERROR call_outbound: missing #### sections in template — business_prompt omitted")
+                    // 无 `#### ` 的旧模板：必须仍发送 business_prompt，否则服务端不渲染导致全程无声音。
+                    businessPrompt = OutboundTemplateStore.legacyBusinessPromptFallback(
+                        from: prompt,
+                        businessVariables: bizVars
+                    )
+                    usedLegacyBody = true
+                    print("[WS] hello call_outbound business_prompt LEGACY(full-body) len=\(businessPrompt.count) bizVarKeys=\(bizVars.keys.sorted())")
                 }
+                if !businessPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    templateVars["business_prompt"] = businessPrompt
+                } else {
+                    print("[WS] ERROR call_outbound: business_prompt empty after extract+fallback")
+                }
+                print("[CloudAudioProof] hello_will_send scene=call_outbound business_prompt_len=\(businessPrompt.count) legacy_body=\(usedLegacyBody) biz_vars=\(bizVars.keys.sorted())")
+            } else {
+                print("[CloudAudioProof] hello_will_send scene=call_outbound callHelloPromptOverride=nil — NO business_prompt (expect no cloud TTS)")
             }
             // 外呼元数据
             if let ctx = outboundHelloContext {
@@ -932,7 +954,11 @@ class WebSocketService: NSObject, ObservableObject {
     /// 开始录音/监听
     @MainActor
     func sendListenStart(mode: ListenMode = .realtime) {
-        guard let sid = sessionId else { return }
+        guard let sid = sessionId else {
+            print("[CloudAudioProof] listen_tx BLOCKED sessionId=nil scene=\(helloScene.rawValue) — cloud will not receive uplink audio")
+            return
+        }
+        print("[CloudAudioProof] listen_tx sending mode=\(mode.rawValue) sid_prefix=\(String(sid.prefix(12)))… scene=\(helloScene.rawValue)")
         print("[WS] sendListenStart mode=\(mode.rawValue) sid=\(sid)")
         let msg: [String: Any] = [
             "session_id": sid,
@@ -1159,8 +1185,10 @@ class WebSocketService: NSObject, ObservableObject {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let typeStr = json["type"] as? String else {
+            print("[CloudAudioProof] text_rx NON_JSON or missing type len=\(text.count) prefix=\(text.prefix(120))")
             return
         }
+        print("[CloudAudioProof] text_json_rx type=\(typeStr) scene_snap=\(cloudProofSceneSnapshot) payload_chars=\(text.count)")
         
         switch typeStr {
         case "hello":
@@ -1208,6 +1236,7 @@ class WebSocketService: NSObject, ObservableObject {
 
         case "error":
             // Server-side errors (incl. auth/token) — log full payload; `message` alone may omit fields.
+            print("[CloudAudioProof] server_error_rx scene_snap=\(cloudProofSceneSnapshot) (expect no TTS after this)")
             print("[WS][server_error] raw_json=\(text)")
             let message = json["message"] as? String ?? ""
             Task { @MainActor [weak self] in
@@ -1268,6 +1297,9 @@ class WebSocketService: NSObject, ObservableObject {
         // Debug: confirm binary frames are being received
         binaryRxCount += 1
         binaryRxBytes += data.count
+        if binaryRxCount <= 12 || (binaryRxCount % 50) == 0 {
+            print("[CloudAudioProof] binary_opus_rx frame#=\(binaryRxCount) frame_bytes=\(data.count) cum_bytes=\(binaryRxBytes) scene_snap=\(cloudProofSceneSnapshot)")
+        }
         if binaryRxCount <= 3 || (binaryRxCount % 50) == 0 {
             print("[WS] binary rx: count=\(binaryRxCount) bytes=\(binaryRxBytes) frameSize=\(data.count)")
         }
@@ -1296,6 +1328,9 @@ class WebSocketService: NSObject, ObservableObject {
     private func handleHelloMessage(sessionId: String?, audioParams: DownstreamAudioParams?) {
         suppressReceiveFailureOnce = false
         helloAcked = true
+        binaryRxCount = 0
+        binaryRxBytes = 0
+        cloudProofSceneSnapshot = helloScene.rawValue
         if helloScene == .call {
             callHelloPromptOverride = nil
             helloApnsRequestId = nil
@@ -1323,6 +1358,7 @@ class WebSocketService: NSObject, ObservableObject {
         }
 
         print("[WS] 已连接, sessionId: \(self.sessionId ?? "nil"), 下行采样率: \(downstreamSampleRate)")
+        print("[CloudAudioProof] hello_rx_ack scene=\(helloScene.rawValue) session_id=\(self.sessionId ?? "nil") downstream_sr=\(downstreamSampleRate) audio_fmt=\(audioFormat)")
         notifyDelegates { $0.webSocketDidConnect(sessionId: self.sessionId ?? "") }
     }
 
@@ -1339,7 +1375,11 @@ class WebSocketService: NSObject, ObservableObject {
     }
 
     private func processTTSMessage(_ json: [String: Any]) {
-        guard let stateStr = json["state"] as? String else { return }
+        guard let stateStr = json["state"] as? String else {
+            print("[CloudAudioProof] tts_json_rx MISSING state scene_snap=\(cloudProofSceneSnapshot) keys=\(json.keys.sorted())")
+            return
+        }
+        print("[CloudAudioProof] tts_json_rx state=\(stateStr) scene_snap=\(cloudProofSceneSnapshot)")
         let text = json["text"] as? String ?? ""
 
         switch stateStr {
@@ -1374,6 +1414,7 @@ class WebSocketService: NSObject, ObservableObject {
     @MainActor
     private func handleTTSStartMessage(sampleRate: Int?, sessionID: String, rawDescription: String) {
         let resolvedSampleRate = sampleRate ?? downstreamSampleRate
+        print("[CloudAudioProof] tts_ctrl_start scene=\(helloScene.rawValue) sample_rate=\(resolvedSampleRate) sid=\(sessionID)")
         print("[WS] TTS 开始, session_id=\(sessionID) sample_rate=\(resolvedSampleRate) raw=\(rawDescription)")
         notifyDelegates { $0.webSocketDidReceiveTTSStart(sampleRate: resolvedSampleRate) }
     }
@@ -1476,6 +1517,8 @@ class WebSocketService: NSObject, ObservableObject {
 
     @MainActor private var binaryRxCount: Int = 0
     @MainActor private var binaryRxBytes: Int = 0
+    /// 供 URLSession 收包线程打印 `[CloudAudioProof]`（与 `helloScene` 同步更新）。
+    nonisolated(unsafe) private var cloudProofSceneSnapshot: String = ""
     @MainActor private var helloRetryTask: Task<Void, Never>?
     @MainActor private var helloAcked: Bool = false
     @MainActor private var suppressReceiveFailureOnce: Bool = false

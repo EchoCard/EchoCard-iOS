@@ -62,6 +62,20 @@ enum OutboundTemplateStore {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : body
     }
+
+    /// 旧版外呼任务正文可能没有 `#### ` 章节；此前客户端会把**整段**当作业务正文发给服务端。
+    /// `call_outbound` 仍要求 `template_vars.business_prompt`，缺省会直接导致无 TTS / 无下行音频。
+    static func legacyBusinessPromptFallback(
+        from templateContent: String,
+        businessVariables: [String: String]
+    ) -> String {
+        var body = templateContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        for (key, value) in businessVariables {
+            body = body.replacingOccurrences(of: "&{\(key)}", with: value)
+        }
+        return body
+    }
+
     /// Returns one element per persisted template. Element keys match v1 spec:
     /// `name`, `task_type`, `updated_at` (ISO8601 date).
     @MainActor

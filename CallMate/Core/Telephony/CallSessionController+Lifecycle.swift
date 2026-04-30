@@ -526,11 +526,13 @@ extension CallSessionController {
         }
 
         // Skip entirely for manual outgoing calls not initiated by the app.
-        // App-managed calls always have pendingOutboundTaskID set via
-        // setOutboundTaskContext(taskID:prompt:) before dialing.
-        // For manual calls we must not open LiveCallView, start recording, or trigger AI.
-        let isAppManaged = (pendingOutboundTaskID != nil) ||
-            !(pendingOutboundPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        // Context lives in pending* before the first activate; after promotion it is only in active*.
+        // MCU may emit `call_state(active)` more than once — the second time pending* is nil and
+        // must still count as app-managed or we mis-detect "manual call" and skip the whole path.
+        let pendingPrompt = pendingOutboundPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let activePrompt = activeOutboundPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let isAppManaged = pendingOutboundTaskID != nil || !pendingPrompt.isEmpty
+            || activeOutboundTaskID != nil || !activePrompt.isEmpty
         guard isAppManaged else {
             print("[OutboundRec] activateOutgoing: no app context (manual call) — skip session setup")
             return
@@ -638,20 +640,30 @@ extension CallSessionController {
 
     func startListening() {
         if isMuted {
+            print("[CloudAudioProof] startListening BLOCKED isMuted=true")
             print("[NOSOUND] startListening BLOCKED: isMuted=true")
             return
         }
         syncWSSessionIdFromService(reason: "startListening")
-        guard status == .connected else { return }
+        guard status == .connected else {
+            print("[CloudAudioProof] startListening BLOCKED status=\(status) (need .connected) — listen will not be sent")
+            return
+        }
         if ws.sessionId == nil {
+            print("[CloudAudioProof] startListening BLOCKED ws.sessionId=nil wsConnected=\(ws.isConnected)")
             print("[NOSOUND] startListening BLOCKED: ws.sessionId=nil wsConnected=\(ws.isConnected)")
             return
         }
-        guard !wsListeningStarted else { return }
+        guard !wsListeningStarted else {
+            print("[CloudAudioProof] startListening SKIP already_started=true")
+            return
+        }
 
         let mode: ListenMode = scene.isManualInteractionScene ? .manual : .realtime
+        print("[CloudAudioProof] startListening invoking sendListenStart mode=\(mode.rawValue) scene=\(scene)")
         ws.sendListenStart(mode: mode)
         wsListeningStarted = true
+        print("[CloudAudioProof] startListening OK wsListeningStarted=true mode=\(mode.rawValue)")
         print("[NOSOUND] startListening OK: wsListeningStarted=true mode=\(mode) bleAudioBuf=\(bleAudioBuffer.count)")
         print("[MIC_CHAIN] ws_listen_started: mode=\(mode) source=\(inputSource) micGuard=\(micMutedByTTSGuard) isMicMuted=\(audio.isMicMuted)")
         print("[CallSession] wsListeningStarted=true (source=\(inputSource))")

@@ -6,6 +6,7 @@ extension CallSessionController: WebSocketServiceDelegate {
     func webSocketDidConnect(sessionId: String) {
         guard isActiveController else { return }
         hasReceivedWSHelloInCurrentCall = true
+        print("[CloudAudioProof] delegate_ws_hello_ack sessionId_prefix=\(String(sessionId.prefix(12)))… bleCallActive=\(bleCallActive) bleAudAck=\(bleAudioStartAcked) pendingActiveConnect=\(pendingActiveConnect) status=\(status) scene=\(scene) wsListenAlready=\(wsListeningStarted)")
         print("[NOSOUND] ws_connected: sessionId=\(sessionId) bleCallActive=\(bleCallActive) acked=\(bleAudioStartAcked) wsListening=\(wsListeningStarted)")
         print("[WS_RECONNECT_TRACE] hello_seen sticky=true source=webSocketDidConnect")
         latencyManualSceneLog("ws_hello_ack", extra: "sessionId=\(sessionId)")
@@ -28,9 +29,22 @@ extension CallSessionController: WebSocketServiceDelegate {
             syncLiveActivity()
         }
         if handleWSConnectBLEAction(connectPlan.bleAction) {
+            scheduleCloudAudioProofWatchdog()
             return
         }
         handleWSConnectMicrophoneFlowIfNeeded()
+        scheduleCloudAudioProofWatchdog()
+    }
+
+    /// 定时打印：区分「云端从未下发 TTS/二进制」vs「已下发但 BLE 未出声」。
+    private func scheduleCloudAudioProofWatchdog() {
+        Task { @MainActor [weak self] in
+            for sec in [5, 15] {
+                try? await Task.sleep(nanoseconds: UInt64(sec) * 1_000_000_000)
+                guard let self else { return }
+                print("[CloudAudioProof] watchdog t+\(sec)s tts_frames=\(self.ttsAudioRxCount) tts_bytes=\(self.ttsAudioRxBytes) wsListening=\(self.wsListeningStarted) ws_sid_nil=\(self.ws.sessionId == nil) bleAudAck=\(self.bleAudioStartAcked) status=\(self.status)")
+            }
+        }
     }
 
     @discardableResult
@@ -243,7 +257,17 @@ extension CallSessionController: WebSocketServiceDelegate {
             self.ws.setCallHelloPromptOverride(self.activeOutboundPrompt)
             let taskForApns = self.activeOutboundTaskID ?? self.pendingOutboundTaskID
             self.ws.setHelloApnsRequestId(OutboundTaskQueueService.shared.apnsRequestId(forTask: taskForApns))
-            self.ws.connect(audioFormat: audioFormat, scene: .call, reason: "scheduleWSNoHelloRetry_\(attempt)")
+            let retryScene: WebSocketScene =
+                (self.outboundCallId != nil || self.currentIncomingCall?.title == "[OUTBOUND_TASK]")
+                ? .callOutbound : .call
+            if retryScene == .callOutbound {
+                self.ws.setOutboundHelloContext(OutboundHelloContext(
+                    targetPhone: self.outboundTargetPhone ?? "",
+                    callerName: self.outboundCallerName ?? "",
+                    taskGoal: self.outboundTaskGoal ?? ""
+                ))
+            }
+            self.ws.connect(audioFormat: audioFormat, scene: retryScene, reason: "scheduleWSNoHelloRetry_\(attempt)")
         }
     }
 
@@ -337,6 +361,7 @@ extension CallSessionController: WebSocketServiceDelegate {
         ttsAudioRxBytes += data.count
         let pendingFramesNow = audio.effectivePendingPlaybackBufferCount()
         if ttsAudioRxCount == 1 {
+            print("[CloudAudioProof] first_tts_audio_to_session bytes=\(data.count) bleAudAck=\(bleAudioStartAcked) input=\(inputSource) activeCtl=\(isActiveController)")
             let tsMs = Int(Date().timeIntervalSince1970 * 1000)
             let queueAheadMs = pendingFramesNow * max(1, ws.downstreamFrameDuration)
             print("[TTS_LATENCY] stage=binary_first_rx t=\(nowLogString()) ts_ms=\(tsMs) bytes=\(data.count)")

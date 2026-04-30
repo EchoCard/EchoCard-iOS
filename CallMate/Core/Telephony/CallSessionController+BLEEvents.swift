@@ -86,8 +86,10 @@ extension CallSessionController {
                 return
             }
             handleBLECallEndPlan(endPlan)
-        case .other:
-            break
+        case .other(let normalized):
+            if normalized == "audio_streaming" {
+                handleOutboundCloudOnAudioStreamingIfNeeded()
+            }
         }
     }
 
@@ -284,6 +286,76 @@ extension CallSessionController {
         }
     }
 
+    /// Connects `scene=call_outbound` WS (unless already live) and sends MCU `audio_start` + retry loop.
+    /// Used from `outgoing_answered` and from `call_state(audio_streaming)` when ANCS/`outgoing_answered` is missing.
+    func runOutboundCloudWsAndAudioStart(wsConnectReason: String) {
+        switch transportCoordinator.planBLEOutgoingAnsweredWS(
+            networkSatisfied: permissions.networkStatus == .satisfied
+        ) {
+        case .skipNetworkUnavailable:
+            print("[OutboundRec] \(wsConnectReason): skip ws.connect (network unavailable)")
+        case .connect:
+            if shouldBlockBLEAutoReconnectAfterHello(context: wsConnectReason) {
+                print("[WS_RECONNECT_TRACE] block context=\(wsConnectReason) action=skip_auto_reconnect")
+            } else {
+                bleWSConnectContext = .activeCall
+                pendingActiveConnect = true
+                print("[PromptTrace] \(wsConnectReason) .connect: setCallHelloPromptOverride len=\(activeOutboundPrompt?.count ?? -1) wsIsConnected=\(ws.isConnected) wsIsConnecting=\(ws.isConnecting)")
+                if ws.isConnectedInCallOutboundScene {
+                    print("[WS_RECONNECT_TRACE] \(wsConnectReason): skip reconnect, already in call_outbound WS (sessionId present)")
+                } else {
+                    if ws.isConnected || ws.isConnecting {
+                        print("[WS_RECONNECT_TRACE] \(wsConnectReason): force disconnect stale ws before reconnect")
+                        ws.disconnect()
+                    }
+                    let taskForApns = activeOutboundTaskID ?? pendingOutboundTaskID
+                    ws.setHelloApnsRequestId(OutboundTaskQueueService.shared.apnsRequestId(forTask: taskForApns))
+                    ws.setCallHelloPromptOverride(activeOutboundPrompt)
+                    ws.setOutboundHelloContext(OutboundHelloContext(
+                        targetPhone: outboundTargetPhone ?? "",
+                        callerName: outboundCallerName ?? "",
+                        taskGoal: outboundTaskGoal ?? ""
+                    ))
+                    transportCoordinator.markWSConnectStarted()
+                    let audioFormat = bleWSAudioFormat
+                    print("[OutboundRec] \(wsConnectReason): connecting WS audioFormat=\(audioFormat) scene=call_outbound")
+                    ws.connect(audioFormat: audioFormat, scene: .callOutbound, reason: wsConnectReason)
+                }
+            }
+        }
+
+        if !bleAudioStartAcked {
+            latAudioStartSentAt = Date()
+            if wsConnectReason == "handleBLECallStateOutgoingAnswered" {
+                latencyLog("send_audio_start_outgoing_answered")
+            } else {
+                latencyLog("send_audio_start_outbound_fallback")
+            }
+            sendCallCommand("audio_start", extra: ["codec": bleMCUAudioCodecName], expectAck: false)
+        }
+        startAudioStartRetryLoop()
+    }
+
+    /// When MCU reports SCO/audio path up but never sends `outgoing_answered`, still bring up call_outbound AI.
+    private func handleOutboundCloudOnAudioStreamingIfNeeded() {
+        guard inputSource == .ble else { return }
+        guard !ws.isConnectedInCallOutboundScene else { return }
+        guard outboundCallId != nil else { return }
+        let trimmedActive = activeOutboundPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasCtx = activeOutboundTaskID != nil || !trimmedActive.isEmpty
+        guard hasCtx else { return }
+        print("[OutboundRec] call_state(audio_streaming): fallback outbound cloud WS (outgoing_answered missing or WS not call_outbound)")
+        bleCallActive = true
+        applyPhoneIDContextForWS()
+        if currentIncomingCall == nil {
+            activateOutgoingCallIfNeeded()
+        }
+        if let call = currentIncomingCall, call.title == "[OUTBOUND_TASK]" {
+            liveCallRequest = call
+        }
+        runOutboundCloudWsAndAudioStart(wsConnectReason: "call_state_audio_streaming_fallback")
+    }
+
     func handleBLECallStateOutgoingAnswered() {
         /*
          * MCU detected ANCS "当前通话" — the callee has answered the outgoing
@@ -344,60 +416,7 @@ extension CallSessionController {
             print("[OutboundRec] outgoing_answered: WARN no outbound currentIncomingCall — LiveCall not presented")
         }
 
-        // Connect WS now (deferred from activateOutgoingCallIfNeeded).
-        // Always reconnect fresh — never reuse a lingering session from a previous call.
-        // A stale session would carry the wrong context and drop the outbound prompt.
-        switch transportCoordinator.planBLEOutgoingAnsweredWS(
-            networkSatisfied: permissions.networkStatus == .satisfied
-        ) {
-        case .skipNetworkUnavailable:
-            print("[OutboundRec] outgoing_answered: skip ws.connect (network unavailable)")
-        case .connect:
-            if shouldBlockBLEAutoReconnectAfterHello(context: "handleBLECallStateOutgoingAnswered") {
-                print("[WS_RECONNECT_TRACE] block context=handleBLECallStateOutgoingAnswered action=skip_auto_reconnect")
-            } else {
-                bleWSConnectContext = .activeCall
-                // Signal that WS connected for an already-active outbound call, so
-                // planAfterWSConnect returns .startPendingActiveFlow → startConnectedFlow()
-                // and the status transitions to .connected (instead of stalling at .ringing).
-                pendingActiveConnect = true
-                print("[PromptTrace] outgoing_answered .connect: calling setCallHelloPromptOverride len=\(activeOutboundPrompt?.count ?? -1) wsIsConnected=\(ws.isConnected) wsIsConnecting=\(ws.isConnecting)")
-                if ws.isConnectedInCallScene || ws.isConnectedInCallOutboundScene {
-                    // WS is already live in the correct call scene with a valid session.
-                    // This happens when outgoing_answered fires for an incoming call (MCU quirk)
-                    // or when the call-scene WS was established earlier (e.g., during ring).
-                    // Do NOT reconnect — doing so sends a duplicate hello and breaks audio for
-                    // both parties.
-                    print("[WS_RECONNECT_TRACE] outgoing_answered: skip reconnect, already in valid call-scene WS (sessionId present)")
-                } else {
-                    if ws.isConnected || ws.isConnecting {
-                        // Disconnect stale non-call-scene WS (e.g., lingering outbound-chat/config).
-                        // This ensures the outbound call gets a fresh session with the correct prompt.
-                        print("[WS_RECONNECT_TRACE] outgoing_answered: force disconnect stale ws before reconnect")
-                        ws.disconnect()
-                    }
-                    let taskForApns = activeOutboundTaskID ?? pendingOutboundTaskID
-                    ws.setHelloApnsRequestId(OutboundTaskQueueService.shared.apnsRequestId(forTask: taskForApns))
-                    ws.setCallHelloPromptOverride(activeOutboundPrompt)
-                    ws.setOutboundHelloContext(OutboundHelloContext(
-                        targetPhone: outboundTargetPhone ?? "",
-                        callerName: outboundCallerName ?? "",
-                        taskGoal: outboundTaskGoal ?? ""
-                    ))
-                    transportCoordinator.markWSConnectStarted()
-                    let audioFormat = bleWSAudioFormat
-                    print("[OutboundRec] outgoing_answered: connecting WS audioFormat=\(audioFormat) scene=call_outbound")
-                    ws.connect(audioFormat: audioFormat, scene: .callOutbound, reason: "handleBLECallStateOutgoingAnswered")
-                }
-            }
-        }
-
-        if !bleAudioStartAcked {
-            latAudioStartSentAt = Date()
-            latencyLog("send_audio_start_outgoing_answered")
-            sendCallCommand("audio_start", extra: ["codec": bleMCUAudioCodecName], expectAck: false)
-        }
-        startAudioStartRetryLoop()
+        runOutboundCloudWsAndAudioStart(wsConnectReason: "handleBLECallStateOutgoingAnswered")
     }
 
     func promoteAckFromDownlinkIfNeeded() {
