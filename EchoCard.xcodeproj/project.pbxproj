@@ -339,7 +339,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 245;
-				DEVELOPMENT_TEAM = MY2B9QQ34R;
+				DEVELOPMENT_TEAM = Q322S2LD93;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "CallMateLiveActivity-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -349,7 +349,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.9.231;
-				PRODUCT_BUNDLE_IDENTIFIER = greater.vaca.CallMate.LiveActivity;
+				PRODUCT_BUNDLE_IDENTIFIER = greater.longshu.CallMateTool.LiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
@@ -366,7 +366,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 245;
-				DEVELOPMENT_TEAM = MY2B9QQ34R;
+				DEVELOPMENT_TEAM = Q322S2LD93;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "CallMateLiveActivity-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -376,7 +376,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.9.231;
-				PRODUCT_BUNDLE_IDENTIFIER = greater.vaca.CallMate.LiveActivity;
+				PRODUCT_BUNDLE_IDENTIFIER = greater.longshu.CallMateTool.LiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
@@ -401,7 +401,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.9.147;
-				PRODUCT_BUNDLE_IDENTIFIER = com.hushuanglin.CallMate.dev.UITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.longshu.CallMateTool.dev.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -428,7 +428,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.9.147;
-				PRODUCT_BUNDLE_IDENTIFIER = com.hushuanglin.CallMate.dev.UITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.longshu.CallMateTool.dev.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -575,7 +575,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 245;
-				DEVELOPMENT_TEAM = MY2B9QQ34R;
+				DEVELOPMENT_TEAM = Q322S2LD93;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
@@ -605,7 +605,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.9.231;
-				PRODUCT_BUNDLE_IDENTIFIER = greater.vaca.CallMate;
+				PRODUCT_BUNDLE_IDENTIFIER = greater.longshu.CallMateTool;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -635,6 +635,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 245;
+				DEVELOPMENT_TEAM = Q322S2LD93;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
@@ -664,7 +665,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.9.231;
-				PRODUCT_BUNDLE_IDENTIFIER = greater.vaca.CallMate;
+				PRODUCT_BUNDLE_IDENTIFIER = greater.longshu.CallMateTool;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

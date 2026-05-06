@@ -17,8 +17,8 @@ final class CallMateUITests: XCTestCase {
         let app = configuredApp()
         app.launch()
 
+        XCTAssertTrue(app.otherElements["calls-root"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["calls-device-button"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.tabBars.buttons["Call Out"].waitForExistence(timeout: 5))
 
         app.buttons["calls-device-button"].tap()
         XCTAssertTrue(app.buttons["device-modal-close-button"].waitForExistence(timeout: 5))
@@ -29,18 +29,11 @@ final class CallMateUITests: XCTestCase {
         let app = configuredApp()
         app.launch()
 
-        let receiveTab = app.tabBars.buttons["Receive"]
-        let callOutTab = app.tabBars.buttons["Call Out"]
-
         XCTAssertTrue(app.buttons["calls-device-button"].waitForExistence(timeout: 10))
-        XCTAssertTrue(callOutTab.waitForExistence(timeout: 5))
-
-        callOutTab.tap()
-        XCTAssertTrue(waitForSelection(of: callOutTab))
-
-        receiveTab.tap()
-        XCTAssertTrue(waitForSelection(of: receiveTab))
-        XCTAssertTrue(app.buttons["calls-device-button"].waitForExistence(timeout: 10))
+        let settingsButton = app.buttons["calls-settings-button"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 5))
+        settingsButton.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
         app.terminate()
     }
 
@@ -90,14 +83,6 @@ final class CallMateUITests: XCTestCase {
             app.launchArguments += [LaunchArgument.seedCalls, "\(seedCallCount)"]
         }
         return app
-    }
-
-    private func waitForSelection(of element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
-        let expectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "selected == true"),
-            object: element
-        )
-        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 
     private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval = 2) -> Bool {

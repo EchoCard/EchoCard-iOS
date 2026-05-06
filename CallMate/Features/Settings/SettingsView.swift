@@ -12,9 +12,6 @@ struct SettingsView: View {
     let setLanguage: (Language) -> Void
     let showBackButton: Bool
     let onBack: () -> Void
-    let onTest: () -> Void
-    let onLockScreenTest: () -> Void
-    let onSimulationCalls: (() -> Void)?
     let onDeviceManage: (() -> Void)?
     let onRebind: (() -> Void)?
     let onPromptRules: (() -> Void)?
@@ -53,9 +50,6 @@ struct SettingsView: View {
         setLanguage: @escaping (Language) -> Void,
         showBackButton: Bool,
         onBack: @escaping () -> Void,
-        onTest: @escaping () -> Void,
-        onLockScreenTest: @escaping () -> Void,
-        onSimulationCalls: (() -> Void)? = nil,
         onDeviceManage: (() -> Void)? = nil,
         onRebind: (() -> Void)? = nil,
         onPromptRules: (() -> Void)? = nil,
@@ -66,12 +60,9 @@ struct SettingsView: View {
         self.setLanguage = setLanguage
         self.showBackButton = showBackButton
         self.onBack = onBack
-        self.onTest = onTest
-        self.onLockScreenTest = onLockScreenTest
         self.onDeviceManage = onDeviceManage
         self.onRebind = onRebind
         self.onPromptRules = onPromptRules
-        self.onSimulationCalls = onSimulationCalls
         self.onVoiceToneVisibilityChange = onVoiceToneVisibilityChange
         self.onPromptRulesVisibilityChange = onPromptRulesVisibilityChange
     }
@@ -124,11 +115,6 @@ struct SettingsView: View {
                             navigationRoute = .outboundTemplates
                         }
                     )
-                    SettingsTestingSectionView(
-                        language: language,
-                        onTest: onTest,
-                        onSimulationCalls: onSimulationCalls
-                    )
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
@@ -162,7 +148,6 @@ struct SettingsView: View {
                 language: language,
                 feedbackType: "none",
                 onClose: { showAiChat = false },
-                onTest: nil,
                 initialMessages: nil,
                 showInitialMessage: false,
                 initMessagesOverride: [

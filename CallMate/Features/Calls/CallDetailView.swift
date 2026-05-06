@@ -885,7 +885,6 @@ struct CallDetailView: View {
                 inlineMessagesMode: true,
                 voiceControl: feedbackVoiceControl,
                 showCloseButton: false,
-                onTest: nil,
                 initialMessages: feedbackInitialMessages(for: selectedFeedbackType),
                 showInitialMessage: false,
                 initMessagesOverride: feedbackInitMessages(for: selectedFeedbackType),

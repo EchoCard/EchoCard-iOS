@@ -1270,7 +1270,6 @@ struct OutboundCreateTaskAIView: View {
                     isEmbedded: true,
                     voiceControl: voiceControl,
                     showCloseButton: false,
-                    onTest: nil,
                     initialMessages: [
                         ExtendedMessage(
                             id: Int.random(in: 10000...99999),
