@@ -50,6 +50,9 @@ struct ContentView: View {
     @AppStorage("callmate.live_activity_resident_enabled") private var isResidentLiveActivityEnabled: Bool = false
     private let activeModeKey = "callmate_active_mode"
     private let hasCompletedOnboardingKey = "callmate_has_completed_onboarding"
+    /// True after user enters the binding scan flow; consumed on first transition to `.main` to
+    /// push fillers to the **new** board only (not on every cold launch / restore to main).
+    @State private var pendingFillerPreloadAfterScanSession = false
 
     @MainActor
     init(appServices: AppServices? = nil, appRouter: AppRouter? = nil) {
@@ -126,9 +129,20 @@ struct ContentView: View {
                 liveCallPresentation.syncForActiveScene(appState: appState)
             }
             .onChange(of: appState) { _, newValue in
-                if newValue == .main {
+                switch newValue {
+                case .scanning:
+                    pendingFillerPreloadAfterScanSession = true
+                case .landing:
+                    pendingFillerPreloadAfterScanSession = false
+                case .main:
                     appServices.controlChannel.activate()
                     liveCallPresentation.syncForActiveScene(appState: newValue)
+                    if pendingFillerPreloadAfterScanSession {
+                        pendingFillerPreloadAfterScanSession = false
+                        kickFillerPreloadAfterScanSessionIfPossible()
+                    }
+                case .bound, .onboarding:
+                    break
                 }
             }
     }
@@ -306,6 +320,40 @@ struct ContentView: View {
         withAnimation(.easeInOut(duration: 0.3)) {
             appState = .scanning
         }
+    }
+
+    /// After landing → scan (or main → 重新绑定 → scan), first arrival on home: push fillers if BLE ready.
+    private func kickFillerPreloadAfterScanSessionIfPossible() {
+        let trimmedNew = (ble.runtimeMCUDeviceID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedNew.isEmpty else { return }
+        let voiceId = UserDefaults.standard.string(forKey: "callmate.voiceId")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !voiceId.isEmpty else { return }
+        kickFillerPreloadIfPossible(expectedDeviceId: trimmedNew, voiceId: voiceId, allowDelayedRetry: true)
+    }
+
+    private func kickFillerPreloadIfPossible(expectedDeviceId: String, voiceId: String, allowDelayedRetry: Bool) {
+        guard appState == .main else { return }
+        let current = (ble.runtimeMCUDeviceID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard current == expectedDeviceId else { return }
+        guard ble.currentCallSID == nil else { return }
+        guard ble.isReady else {
+            if allowDelayedRetry {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
+                    kickFillerPreloadIfPossible(expectedDeviceId: expectedDeviceId, voiceId: voiceId, allowDelayedRetry: false)
+                }
+            }
+            return
+        }
+        guard ble.isPreloadReady else {
+            if allowDelayedRetry {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
+                    kickFillerPreloadIfPossible(expectedDeviceId: expectedDeviceId, voiceId: voiceId, allowDelayedRetry: false)
+                }
+            }
+            return
+        }
+        print("[App] filler preload after scan/bind session voice=\(voiceId) device=\(expectedDeviceId)")
+        _ = TTSFillerSyncCoordinator.shared.preload(voiceId: voiceId, deviceId: expectedDeviceId, force: false)
     }
 
     private func performDeleteAllLocalData() {

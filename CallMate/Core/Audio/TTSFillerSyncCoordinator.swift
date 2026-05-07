@@ -45,6 +45,9 @@ final class TTSFillerSyncCoordinator: ObservableObject {
     /// without an extra KV round-trip. Persisted to UserDefaults.
     @Published private(set) var lastPushedHash: String? = UserDefaults.standard.string(forKey: metaHashKey)
     @Published private(set) var lastPushedVoiceId: String? = UserDefaults.standard.string(forKey: metaVoiceKey)
+    /// MCU `runtimeMCUDeviceID` that received `lastPushedHash`. Required so a **new** board after
+    /// rebind does not incorrectly skip upload when voice + filler meta are unchanged.
+    @Published private(set) var lastPushedDeviceId: String? = UserDefaults.standard.string(forKey: metaDeviceKey)
 
     // MARK: - Config
 
@@ -73,6 +76,7 @@ final class TTSFillerSyncCoordinator: ObservableObject {
     private static let maxRetransmitsPerAsset = 3
     private static let metaHashKey = "callmate.filler.lastPushedHash"
     private static let metaVoiceKey = "callmate.filler.lastPushedVoiceId"
+    private static let metaDeviceKey = "callmate.filler.lastPushedDeviceId"
 
     private init(ble: any CallMateBLELibraryClient) {
         self.ble = ble
@@ -186,8 +190,9 @@ final class TTSFillerSyncCoordinator: ObservableObject {
     // MARK: - Public API
 
     /// Kick a preload run. Safe to call redundantly — if the same voice_id is
-    /// already in flight, the call is coalesced. If the voice_id's hash matches
-    /// `lastPushedHash` and `force == false`, returns immediately.
+    /// already in flight, the call is coalesced. If `force == false` and the
+    /// voice_id's hash matches `lastPushedHash` **for the same** `deviceId` as
+    /// `lastPushedDeviceId`, returns immediately.
     @discardableResult
     func preload(voiceId: String, deviceId: String, force: Bool = false) -> Task<Void, Error> {
         if let running = runningTask, !running.isCancelled {
@@ -220,6 +225,10 @@ final class TTSFillerSyncCoordinator: ObservableObject {
     // MARK: - Flow
 
     private func runPreload(voiceId: String, deviceId: String, force: Bool) async throws {
+        let trimmedDeviceId = deviceId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDeviceId.isEmpty else {
+            throw CoordinatorError.emptyDeviceId
+        }
         guard !isBlockedByCall else {
             throw CoordinatorError.inCall
         }
@@ -232,7 +241,7 @@ final class TTSFillerSyncCoordinator: ObservableObject {
 
         // 1) HTTP fetch
         state = .fetchingMetadata(voiceId: voiceId)
-        let resp = try await TTSFillerService.fetchFillers(voiceId: voiceId, deviceId: deviceId)
+        let resp = try await TTSFillerService.fetchFillers(voiceId: voiceId, deviceId: trimmedDeviceId)
         guard !resp.fillers.isEmpty else {
             throw CoordinatorError.emptyResponse
         }
@@ -254,8 +263,13 @@ final class TTSFillerSyncCoordinator: ObservableObject {
 
         // 3) Hash (iOS side record; MCU also stores its own copy).
         let hash = Self.computeMetaHash(voiceId: resp.voiceId, assets: encoded)
-        if !force, hash == lastPushedHash, resp.voiceId == lastPushedVoiceId {
-            print("[TTSFillers][coord] skip: hash unchanged (\(hash))")
+        let lastDev = (lastPushedDeviceId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !force,
+           hash == lastPushedHash,
+           resp.voiceId == lastPushedVoiceId,
+           !lastDev.isEmpty,
+           lastDev == trimmedDeviceId {
+            print("[TTSFillers][coord] skip: hash unchanged for same device (\(hash))")
             state = .success(voiceId: resp.voiceId, hash: hash)
             return
         }
@@ -266,8 +280,10 @@ final class TTSFillerSyncCoordinator: ObservableObject {
         // 5) Persist success
         UserDefaults.standard.set(hash, forKey: Self.metaHashKey)
         UserDefaults.standard.set(resp.voiceId, forKey: Self.metaVoiceKey)
+        UserDefaults.standard.set(trimmedDeviceId, forKey: Self.metaDeviceKey)
         lastPushedHash = hash
         lastPushedVoiceId = resp.voiceId
+        lastPushedDeviceId = trimmedDeviceId
         state = .success(voiceId: resp.voiceId, hash: hash)
         print("[TTSFillers][coord] success voice=\(resp.voiceId) hash=\(hash)")
     }
@@ -450,6 +466,7 @@ final class TTSFillerSyncCoordinator: ObservableObject {
         case bleNotReady
         case preloadCharMissing
         case emptyResponse
+        case emptyDeviceId
         case assetTooLarge(id: String, bytes: Int)
         case ackTimeout(cmd: String)
         case ackNonZero(cmd: String, result: Int)
@@ -464,6 +481,8 @@ final class TTSFillerSyncCoordinator: ObservableObject {
                 return "coord: preload characteristic not found on device"
             case .emptyResponse:
                 return "coord: server returned 0 fillers"
+            case .emptyDeviceId:
+                return "coord: empty device id"
             case let .assetTooLarge(id, bytes):
                 return "coord: asset \(id) is \(bytes) B (> cap)"
             case let .ackTimeout(cmd):
