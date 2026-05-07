@@ -1,5 +1,5 @@
 .DS_Store
-# Pods + EchoCard.xcworkspace are tracked so clones build without running `pod install`.
+Pods/
 xcuserdata/
 DerivedData/
 build/

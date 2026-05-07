@@ -48,16 +48,22 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A1B2C3D62F4000010057B50D /* CallMateLiveActivity */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CallMateLiveActivity;
 			sourceTree = "<group>";
 		};
 		B1C2D3E52F5000010057B50D /* CallMateUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CallMateUITests;
 			sourceTree = "<group>";
 		};
 		FA4E94652F3075970057B50D /* CallMate */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CallMate;
 			sourceTree = "<group>";
 		};
@@ -156,8 +162,6 @@
 				A1B2C3D62F4000010057B50D /* CallMateLiveActivity */,
 			);
 			name = CallMateLiveActivity;
-			packageProductDependencies = (
-			);
 			productName = CallMateLiveActivity;
 			productReference = A1B2C3D52F4000010057B50D /* CallMateLiveActivity.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -179,8 +183,6 @@
 				B1C2D3E52F5000010057B50D /* CallMateUITests */,
 			);
 			name = CallMateUITests;
-			packageProductDependencies = (
-			);
 			productName = CallMateUITests;
 			productReference = B1C2D3E42F5000010057B50D /* CallMateUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -190,6 +192,7 @@
 			buildConfigurationList = FA4E946E2F3075990057B50D /* Build configuration list for PBXNativeTarget "CallMate" */;
 			buildPhases = (
 				E49B883FDF9E0D69C3D751AC /* [CP] Check Pods Manifest.lock */,
+				F1A2B3C42F6000010057B50D /* Auto Pod Install */,
 				FA4E945F2F3075970057B50D /* Sources */,
 				FA4E94602F3075970057B50D /* Frameworks */,
 				FA4E94612F3075970057B50D /* Resources */,
@@ -295,6 +298,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		F1A2B3C42F6000010057B50D /* Auto Pod Install */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${SRCROOT}/Podfile",
+				"${SRCROOT}/Podfile.lock",
+				"${SRCROOT}/Pods/Manifest.lock",
+			);
+			name = "Auto Pod Install";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\ncd \"${SRCROOT}\"\nexport LANG=\"${LANG:-en_US.UTF-8}\"\n\nLOCK=\"${SRCROOT}/Podfile.lock\"\nMANIFEST=\"${SRCROOT}/Pods/Manifest.lock\"\n\nif [ ! -f \"$LOCK\" ]; then\n  echo \"error: Podfile.lock missing at $LOCK\" >&2\n  exit 1\nfi\n\nif [ -f \"$MANIFEST\" ] && cmp -s \"$LOCK\" \"$MANIFEST\"; then\n  exit 0\nfi\n\nif ! command -v pod >/dev/null 2>&1; then\n  echo \"error: Pods are missing or out of sync with Podfile.lock. Install CocoaPods from https://cocoapods.org then run: pod install (project: ${SRCROOT})\" >&2\n  exit 1\nfi\n\necho \"note: Running pod install (Pods missing or Podfile.lock changed)...\"\npod install\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
