@@ -195,6 +195,15 @@ final class OutboundTaskQueueService: ObservableObject {
         outboundDialBlockedMessage = nil
     }
 
+    /// After `OutboundTaskStore.clearAll()` (e.g. settings "delete all data"), drop runner state so UI does not reference removed tasks.
+    func resetInMemoryStateAfterTasksFileCleared() {
+        runningRunner?.cancel()
+        runningRunner = nil
+        runningTaskIds.removeAll()
+        apnsRequestIdByTaskId.removeAll()
+        outboundDialBlockedMessage = nil
+    }
+
     /// 立即执行指定任务（仅当当前无任务在执行时）
     /// - Parameter apnsRequestId: APNs `task.run` 推送中的 `request_id`（覆盖同任务上一次的值，供本轮通话 hello 使用）。
     func executeTask(taskID: UUID, apnsRequestId: String? = nil) {

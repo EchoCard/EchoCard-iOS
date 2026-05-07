@@ -229,8 +229,6 @@ final class CallSessionController: NSObject, ObservableObject {
     }
     var contactPassthroughActive: Bool = false
     var ignoredContactIncomingUIDs: Set<Int> = []
-    var systemCallObserverToken: UUID?
-    var systemCallAnsweredObserverToken: UUID?
     var pickupDelayTask: Task<Void, Never>?
     var emergencyPlaybackTask: Task<Void, Never>?
     var didCountIncomingCall: Bool = false
@@ -384,7 +382,6 @@ final class CallSessionController: NSObject, ObservableObject {
         if inputSource == .ble {
             bindBLEEvents()
             bindBLEUplinkReadyCallback()
-            registerSystemCallObserverIfNeeded()
             liveActivityCoordinator.registerActionObserverIfNeeded()
         }
         // 历史上这里调过 `installBinaryFastRxHook(on: resolvedWS)`，把 WS TTS 二进制入队
@@ -413,12 +410,6 @@ final class CallSessionController: NSObject, ObservableObject {
         }
         if Self.activeController === self {
             Self.activeController = nil
-        }
-        if let token = systemCallObserverToken {
-            SystemCallObserver.shared.removeHandler(token)
-        }
-        if let token = systemCallAnsweredObserverToken {
-            SystemCallObserver.shared.removeHandler(token)
         }
         if inputSource == .ble {
             ble.onAudioWriteWindowOpen = nil

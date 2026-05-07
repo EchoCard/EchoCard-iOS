@@ -10,6 +10,7 @@ struct MainTabView: View {
     let setLanguage: (Language) -> Void
     let onDisconnect: () -> Void
     let onFactoryReset: () -> Void
+    let onDeleteAllLocalData: () -> Void
     let onRebind: () -> Void
 
     @ObservedObject private var liveTranscriptRouter: LiveTranscriptNotificationRouter
@@ -25,6 +26,7 @@ struct MainTabView: View {
         setLanguage: @escaping (Language) -> Void,
         onDisconnect: @escaping () -> Void,
         onFactoryReset: @escaping () -> Void,
+        onDeleteAllLocalData: @escaping () -> Void,
         onRebind: @escaping () -> Void,
         liveTranscriptRouter: LiveTranscriptNotificationRouter? = nil
     ) {
@@ -32,6 +34,7 @@ struct MainTabView: View {
         self.setLanguage = setLanguage
         self.onDisconnect = onDisconnect
         self.onFactoryReset = onFactoryReset
+        self.onDeleteAllLocalData = onDeleteAllLocalData
         self.onRebind = onRebind
         _liveTranscriptRouter = ObservedObject(wrappedValue: liveTranscriptRouter ?? .shared)
     }
@@ -43,6 +46,7 @@ struct MainTabView: View {
                 setLanguage: setLanguage,
                 onDisconnect: onDisconnect,
                 onFactoryReset: onFactoryReset,
+                onDeleteAllLocalData: onDeleteAllLocalData,
                 onRebind: onRebind,
                 showsSettingsShortcut: true,
                 showsAIFab: false,
@@ -120,6 +124,7 @@ struct MainTabView: View {
         setLanguage: { _ in },
         onDisconnect: {},
         onFactoryReset: {},
+        onDeleteAllLocalData: {},
         onRebind: {}
     )
 }

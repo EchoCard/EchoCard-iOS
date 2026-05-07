@@ -44,8 +44,8 @@ struct AISecView: View {
                             id: Int.random(in: 10000...99999),
                             sender: .ai,
                             text: language == .zh
-                                ? "你好，我是你的专属AI分身。你可以直接让我帮你调整接听策略，也可以让我帮你打电话、订位或做预约。"
-                                : "Hi, I'm your AI personal secretary. I can help adjust call rules, place AI calls, book restaurants, or handle reservations.",
+                                ? "你好，我是你的专属AI分身。你可以直接告诉我需要查询的数据，或者想调整的接听策略。"
+                                : "Hi, I'm your AI avatar. Ask me for information, or tell me how you'd like call answering rules to work.",
                             msgType: .text
                         )
                     ],
@@ -53,8 +53,8 @@ struct AISecView: View {
                     initMessagesOverride: [
                         ["role": "user", "content": "你好"],
                         ["role": "assistant", "content": language == .zh
-                         ? "你好，我是你的专属AI分身。你可以直接让我帮你调整接听策略，也可以让我帮你打电话、订位或做预约。"
-                         : "Hi, I'm your AI personal secretary. I can help adjust call rules, place AI calls, book restaurants, or handle reservations." ]
+                         ? "你好，我是你的专属AI分身。你可以直接告诉我需要查询的数据，或者想调整的接听策略。"
+                         : "Hi, I'm your AI avatar. Ask me for information, or tell me how you'd like call answering rules to work." ]
                     ],
                     autoPlayIntro: false,
                     isSoundEnabled: $isSoundEnabled,

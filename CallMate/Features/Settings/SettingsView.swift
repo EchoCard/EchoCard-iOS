@@ -14,6 +14,7 @@ struct SettingsView: View {
     let onBack: () -> Void
     let onDeviceManage: (() -> Void)?
     let onRebind: (() -> Void)?
+    let onDeleteAllLocalData: () -> Void
     let onPromptRules: (() -> Void)?
     let onVoiceToneVisibilityChange: ((Bool) -> Void)?
     let onPromptRulesVisibilityChange: ((Bool) -> Void)?
@@ -33,13 +34,13 @@ struct SettingsView: View {
     @State private var showVoiceToneSheet = false
     @State private var showDeviceModal = false
     @State private var navigationRoute: SettingsRoute?
+    @State private var showDeleteAllLocalDataConfirm = false
 
     @AppStorage("callmate.voiceTone") private var voiceToneRaw: String = VoiceTone.taiwan.rawValue
     @AppStorage("callmate.voiceId") private var voiceId: String = ""
     @AppStorage("callmate.voiceDisplayNameOverride") private var voiceDisplayNameOverride: String = ""
 
     private enum SettingsRoute: Hashable, Identifiable {
-        case outboundContacts
         case outboundTemplates
 
         var id: Self { self }
@@ -52,6 +53,7 @@ struct SettingsView: View {
         onBack: @escaping () -> Void,
         onDeviceManage: (() -> Void)? = nil,
         onRebind: (() -> Void)? = nil,
+        onDeleteAllLocalData: @escaping () -> Void,
         onPromptRules: (() -> Void)? = nil,
         onVoiceToneVisibilityChange: ((Bool) -> Void)? = nil,
         onPromptRulesVisibilityChange: ((Bool) -> Void)? = nil
@@ -62,6 +64,7 @@ struct SettingsView: View {
         self.onBack = onBack
         self.onDeviceManage = onDeviceManage
         self.onRebind = onRebind
+        self.onDeleteAllLocalData = onDeleteAllLocalData
         self.onPromptRules = onPromptRules
         self.onVoiceToneVisibilityChange = onVoiceToneVisibilityChange
         self.onPromptRulesVisibilityChange = onPromptRulesVisibilityChange
@@ -108,13 +111,11 @@ struct SettingsView: View {
                                 showPromptModal = true
                             }
                         },
-                        onOutboundContactsTap: {
-                            navigationRoute = .outboundContacts
-                        },
                         onOutboundTemplatesTap: {
                             navigationRoute = .outboundTemplates
                         }
                     )
+                    deleteAllLocalDataSection
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
@@ -123,10 +124,25 @@ struct SettingsView: View {
             .background(AppColors.backgroundSecondary)
             .navigationTitle(t("设置", "Settings"))
             .navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog(
+                t("确认删除所有本地数据？", "Delete all local data?"),
+                isPresented: $showDeleteAllLocalDataConfirm,
+                titleVisibility: .visible
+            ) {
+                Button(t("删除", "Delete"), role: .destructive) {
+                    onDeleteAllLocalData()
+                }
+                Button(t("取消", "Cancel"), role: .cancel) {}
+            } message: {
+                Text(
+                    t(
+                        "将删除通话记录与录音、外呼任务、外呼名单与话术模板、AI 分身对话，并将接听策略恢复为默认。不会解绑设备。",
+                        "Removes call logs and recordings, outbound tasks, contacts, templates, AI chat history, and resets call rules to defaults. Your device stays paired."
+                    )
+                )
+            }
             .navigationDestination(item: $navigationRoute) { route in
                 switch route {
-                case .outboundContacts:
-                    OutboundContactsManagementView(language: language)
                 case .outboundTemplates:
                     OutboundTemplateSettingsView(language: language)
                 }
@@ -239,6 +255,57 @@ struct SettingsView: View {
             await syncBoundCloneVoiceIfNeeded()
         }
         // Swipe-back handled by CallsView container when showBackButton is true
+    }
+
+    private var isCallActive: Bool {
+        CallMateBLEClient.shared.currentCallSID != nil
+    }
+
+    private var deleteAllLocalDataSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(t("数据管理", "Data"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color(lightHex: "6B7280", darkHex: "9CA3AF"))
+                .textCase(.uppercase)
+                .tracking(1.2)
+                .padding(.leading, 16)
+
+            Button {
+                showDeleteAllLocalDataConfirm = true
+            } label: {
+                HStack {
+                    HStack(spacing: 12) {
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 28, height: 28)
+                            .background(Color(hex: "FF3B30"))
+                            .cornerRadius(8)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(t("删除所有本地数据", "Delete All Local Data"))
+                                .font(.system(size: 17))
+                                .foregroundColor(AppColors.textPrimary)
+                            Text(t("通话记录、外呼与 AI 对话等（通话中不可用）", "Call logs, outbound data, AI chats… (disabled during a call)"))
+                                .font(.system(size: 13))
+                                .foregroundColor(Color(lightHex: "6B7280", darkHex: "9CA3AF"))
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color(lightHex: "D1D5DB", darkHex: "4B5563"))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(AppColors.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+            }
+            .buttonStyle(.plain)
+            .disabled(isCallActive)
+            .opacity(isCallActive ? 0.5 : 1)
+        }
     }
     
     private var currentVoiceLabel: String {

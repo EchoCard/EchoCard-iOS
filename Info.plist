@@ -33,7 +33,6 @@
 		<string>bluetooth-central</string>
 		<string>audio</string>
 		<string>fetch</string>
-		<string>voip</string>
 	</array>
 </dict>
 </plist>

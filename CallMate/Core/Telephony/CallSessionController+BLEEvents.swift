@@ -113,10 +113,6 @@ extension CallSessionController {
     }
 
     func handleBLECallState(_ state: String) {
-        // During latency test, only LatencyTestRunner should react to call_state (wait for active → SCO).
-        if ble.latencyTestEchoMode {
-            return
-        }
         let normalizedForDiag = transportCoordinator.normalizeBLECallState(state)
         let callStatePhase = transportCoordinator.classifyBLECallState(state)
         print("[NOSOUND] call_state: \"\(state)\" bleCallActive=\(bleCallActive) acked=\(bleAudioStartAcked) wsListening=\(wsListeningStarted) wsSession=\(ws.sessionId != nil)")
@@ -209,10 +205,7 @@ extension CallSessionController {
             }
             wsListeningStarted = false
             sendCallCommand("ignore", uid: call.uid)
-            // Skip HFP disconnect during latency test — it intentionally uses HFP for audio.
-            if !ble.latencyTestEchoMode {
-                sendHFPDisconnectWithCooldown()
-            }
+            sendHFPDisconnectWithCooldown()
             toastMessage = language == .zh
                 ? "识别为通讯录来电，已放行系统通话"
                 : "Contact call detected, AI passthrough enabled."

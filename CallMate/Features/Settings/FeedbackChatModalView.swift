@@ -230,12 +230,6 @@ struct FeedbackChatModalView: View {
     private var avatarQuickActions: [AvatarQuickAction] {
         [
             AvatarQuickAction(
-                id: "restaurant_booking",
-                title: t("餐厅订位", "Restaurant Booking"),
-                icon: "fork.knife",
-                prompt: t("帮我预订一家餐厅", "Help me book a restaurant")
-            ),
-            AvatarQuickAction(
                 id: "call_rules",
                 title: t("接听规则调整", "Update Call Rules"),
                 icon: "slider.horizontal.3",
@@ -244,7 +238,7 @@ struct FeedbackChatModalView: View {
         ]
     }
     private var shouldShowAvatarQuickActions: Bool {
-        isEmbedded && shouldShowAvatarChatBackground && !isRecording
+        isEmbedded && scene == .updateConfig && !isRecording
     }
 
     /// In inline mode with external voice control, parent view owns the recording overlay.

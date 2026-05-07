@@ -114,20 +114,6 @@ struct DeviceDiagnosticsView: View {
                         sectionHeader(t("测试与调试", "Test & Debug"))
 
                         VStack(spacing: 0) {
-                            NavigationLink {
-                                LatencyTestView(language: language)
-                            } label: {
-                                diagNavRow(
-                                    icon: "timer",
-                                    iconColor: Color(hex: "FF9500"),
-                                    title: t("延迟测试", "Latency Test"),
-                                    subtitle: t("HFP 环回测整链延迟", "HFP round-trip latency")
-                                )
-                            }
-                            .buttonStyle(.plain)
-
-                            cardDivider
-
                             diagToggleRow(
                                 icon: "arrow.triangle.2.circlepath",
                                 iconColor: Color(hex: "5856D6"),

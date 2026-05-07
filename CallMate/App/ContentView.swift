@@ -211,6 +211,7 @@ struct ContentView: View {
                             },
                             onDisconnect: performDisconnect,
                             onFactoryReset: performFactoryReset,
+                            onDeleteAllLocalData: performDeleteAllLocalData,
                             onRebind: performRebind
                         )
                     }
@@ -307,6 +308,14 @@ struct ContentView: View {
         }
     }
 
+    private func performDeleteAllLocalData() {
+        do {
+            try LocalUserDataDeletion.wipeAllLocalUserContent(modelContext: modelContext)
+        } catch {
+            print("[LocalDataDeletion] failed: \(error.localizedDescription)")
+        }
+    }
+
     private func performFactoryReset() {
         UserDefaults.standard.removeObject(forKey: hasCompletedOnboardingKey)
         UserDefaults.standard.removeObject(forKey: "callmate.voiceId")
@@ -322,6 +331,9 @@ struct ContentView: View {
 
         ProcessStrategyStore.resetToDefault()
         OutboundTaskStore.clearAll()
+        OutboundTaskQueueService.shared.resetInMemoryStateAfterTasksFileCleared()
+        OutboundTaskBGScheduler.scheduleIfNeeded()
+        LocalUserDataDeletion.cancelPendingOutboundTaskNotifications()
 
         try? AIChatHistoryService.deleteAllThreads(context: modelContext)
 

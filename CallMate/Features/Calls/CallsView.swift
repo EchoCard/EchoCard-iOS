@@ -13,6 +13,7 @@ struct CallsView: View {
     let setLanguage: (Language) -> Void
     let onDisconnect: () -> Void
     let onFactoryReset: () -> Void
+    let onDeleteAllLocalData: () -> Void
     let onRebind: () -> Void
     let showsSettingsShortcut: Bool
     let showsAIFab: Bool
@@ -153,6 +154,7 @@ struct CallsView: View {
         setLanguage: @escaping (Language) -> Void,
         onDisconnect: @escaping () -> Void,
         onFactoryReset: @escaping () -> Void,
+        onDeleteAllLocalData: @escaping () -> Void,
         onRebind: @escaping () -> Void,
         showsSettingsShortcut: Bool = true,
         showsAIFab: Bool = true,
@@ -163,6 +165,7 @@ struct CallsView: View {
         self.setLanguage = setLanguage
         self.onDisconnect = onDisconnect
         self.onFactoryReset = onFactoryReset
+        self.onDeleteAllLocalData = onDeleteAllLocalData
         self.onRebind = onRebind
         self.showsSettingsShortcut = showsSettingsShortcut
         self.showsAIFab = showsAIFab
@@ -250,6 +253,7 @@ struct CallsView: View {
             onBack: { withAnimation(.easeInOut(duration: 0.25)) { closeSettings() } },
             onDeviceManage: { withAnimation(.easeInOut(duration: 0.25)) { showDeviceModal = true } },
             onRebind: onRebind,
+            onDeleteAllLocalData: onDeleteAllLocalData,
             onVoiceToneVisibilityChange: { showVoiceToneInSettings = $0 },
             onPromptRulesVisibilityChange: { showPromptRulesInSettings = $0 }
         )

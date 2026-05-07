@@ -2,6 +2,9 @@ import SwiftUI
 import AVFoundation
 
 struct VoiceToneSelectionSheet: View {
+    /// 为 `false` 时隐藏「我的声音」标题/卡片与「克隆我的声音」按钮；克隆与同步相关逻辑仍执行。
+    private static let showMyVoiceCloneSectionUI = false
+
     private struct VoiceListItem: Identifiable, Equatable {
         let id: String
         let name: String
@@ -56,22 +59,24 @@ struct VoiceToneSelectionSheet: View {
             ZStack(alignment: .bottom) {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 24) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            sectionHeader(t("我的声音", "My Voice"))
-                            if customVoices.isEmpty {
-                                myVoiceEmptyCard
-                            } else {
-                                VStack(spacing: 0) {
-                                    ForEach(customVoices) { item in
-                                        voiceRow(item)
-                                        if item.id != customVoices.last?.id {
-                                            voiceRowDivider
+                        if Self.showMyVoiceCloneSectionUI {
+                            VStack(alignment: .leading, spacing: 0) {
+                                sectionHeader(t("我的声音", "My Voice"))
+                                if customVoices.isEmpty {
+                                    myVoiceEmptyCard
+                                } else {
+                                    VStack(spacing: 0) {
+                                        ForEach(customVoices) { item in
+                                            voiceRow(item)
+                                            if item.id != customVoices.last?.id {
+                                                voiceRowDivider
+                                            }
                                         }
                                     }
+                                    .background(voiceCardBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl))
+                                    .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
                                 }
-                                .background(voiceCardBackground)
-                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl))
-                                .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
                             }
                         }
 
@@ -92,10 +97,13 @@ struct VoiceToneSelectionSheet: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
-                    .padding(.bottom, customVoices.isEmpty ? 40 : 100)
+                    .padding(
+                        .bottom,
+                        Self.showMyVoiceCloneSectionUI ? (customVoices.isEmpty ? 40 : 100) : 40
+                    )
                 }
 
-                if !customVoices.isEmpty {
+                if Self.showMyVoiceCloneSectionUI, !customVoices.isEmpty {
                     Button {
                         cloneFlowStep = .guide
                         showCloneSheet = true
