@@ -398,6 +398,12 @@ final class CallTransportCoordinator {
         if cmd.hasPrefix("fw_") {
             return .ignore
         }
+        // `play_filler` ACKs (incl. result=-2 "not in audio_streaming" / no active voice path)
+        // must not drive session teardown — same numeric code is used for real "phone handled"
+        // rejections on other commands.
+        if cmd == "play_filler" {
+            return .ignore
+        }
         if result == -2 {
             return .phoneHandledRejected
         }
