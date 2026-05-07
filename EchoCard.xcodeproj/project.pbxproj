@@ -6,6 +6,20 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXAggregateTarget section */
+		D1B2C3D42F7000010057B50D /* Pods-Bootstrap */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = D1B2C3D52F7000010057B50D /* Build configuration list for PBXAggregateTarget "Pods-Bootstrap" */;
+			buildPhases = (
+				F1A2B3C42F6000010057B50D /* Auto Pod Install */,
+			);
+			dependencies = (
+			);
+			name = "Pods-Bootstrap";
+			productName = "Pods-Bootstrap";
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXBuildFile section */
 		96A3E465012FF31BC786E058 /* libPods-CallMate.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 118303478650077FC1E56EBA /* libPods-CallMate.a */; };
 		A1B2C3D42F4000010057B50D /* CallMateLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D52F4000010057B50D /* CallMateLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -18,6 +32,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = FA4E94622F3075970057B50D;
 			remoteInfo = CallMate;
+		};
+		D1B2C3D92F7000010057B50D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FA4E945B2F3075970057B50D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D1B2C3D42F7000010057B50D;
+			remoteInfo = "Pods-Bootstrap";
 		};
 /* End PBXContainerItemProxy section */
 
@@ -192,7 +213,6 @@
 			buildConfigurationList = FA4E946E2F3075990057B50D /* Build configuration list for PBXNativeTarget "CallMate" */;
 			buildPhases = (
 				E49B883FDF9E0D69C3D751AC /* [CP] Check Pods Manifest.lock */,
-				F1A2B3C42F6000010057B50D /* Auto Pod Install */,
 				FA4E945F2F3075970057B50D /* Sources */,
 				FA4E94602F3075970057B50D /* Frameworks */,
 				FA4E94612F3075970057B50D /* Resources */,
@@ -201,6 +221,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				D1B2C3DA2F7000010057B50D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				FA4E94652F3075970057B50D /* CallMate */,
@@ -246,6 +267,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				D1B2C3D42F7000010057B50D /* Pods-Bootstrap */,
 				FA4E94622F3075970057B50D /* CallMate */,
 				A1B2C3D82F4000010057B50D /* CallMateLiveActivity */,
 				B1C2D3E72F5000010057B50D /* CallMateUITests */,
@@ -319,7 +341,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\ncd \"${SRCROOT}\"\nexport LANG=\"${LANG:-en_US.UTF-8}\"\n\nLOCK=\"${SRCROOT}/Podfile.lock\"\nMANIFEST=\"${SRCROOT}/Pods/Manifest.lock\"\n\nif [ ! -f \"$LOCK\" ]; then\n  echo \"error: Podfile.lock missing at $LOCK\" >&2\n  exit 1\nfi\n\nif [ -f \"$MANIFEST\" ] && cmp -s \"$LOCK\" \"$MANIFEST\"; then\n  exit 0\nfi\n\nif ! command -v pod >/dev/null 2>&1; then\n  echo \"error: Pods are missing or out of sync with Podfile.lock. Install CocoaPods from https://cocoapods.org then run: pod install (project: ${SRCROOT})\" >&2\n  exit 1\nfi\n\necho \"note: Running pod install (Pods missing or Podfile.lock changed)...\"\npod install\n";
+			shellScript = "set -e\ncd \"${SRCROOT}\"\nexport LANG=\"${LANG:-en_US.UTF-8}\"\n\nLOCK=\"${SRCROOT}/Podfile.lock\"\nMANIFEST=\"${SRCROOT}/Pods/Manifest.lock\"\nSTUB_CFG=\"${SRCROOT}/Pods/Target Support Files/Pods-CallMate/Pods-CallMate.debug.xcconfig\"\n\nif [ ! -f \"$LOCK\" ]; then\n  echo \"error: Podfile.lock missing at $LOCK\" >&2\n  exit 1\nfi\n\nSTUB=0\nif [ -f \"$STUB_CFG\" ] && grep -q 'Placeholder until' \"$STUB_CFG\"; then\n  STUB=1\nfi\n\nif [ \"$STUB\" -eq 0 ] && [ -f \"$MANIFEST\" ] && cmp -s \"$LOCK\" \"$MANIFEST\"; then\n  exit 0\nfi\n\nif ! command -v pod >/dev/null 2>&1; then\n  echo \"error: Pods are missing or out of sync with Podfile.lock. Install CocoaPods from https://cocoapods.org then run: pod install (project: ${SRCROOT})\" >&2\n  exit 1\nfi\n\necho \"note: Running pod install (Pods missing, Podfile.lock changed, or placeholder xcconfigs)...\"\npod install\necho \"note: CocoaPods finished. Press Build once more so Xcode picks up the new Pods (normal after clone).\" >&2\nexit 1\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -353,6 +375,11 @@
 			isa = PBXTargetDependency;
 			target = FA4E94622F3075970057B50D /* CallMate */;
 			targetProxy = B1C2D3ED2F5000010057B50D /* PBXContainerItemProxy */;
+		};
+		D1B2C3DA2F7000010057B50D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D1B2C3D42F7000010057B50D /* Pods-Bootstrap */;
+			targetProxy = D1B2C3D92F7000010057B50D /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -464,6 +491,22 @@
 			};
 			name = Release;
 		};
+		D1B2C3D62F7000010057B50D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				PRODUCT_NAME = "Pods-Bootstrap";
+			};
+			name = Debug;
+		};
+		D1B2C3D72F7000010057B50D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				PRODUCT_NAME = "Pods-Bootstrap";
+			};
+			name = Release;
+		};
 		FA4E946C2F3075990057B50D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -503,7 +546,7 @@
 				DEVELOPMENT_TEAM = MY2B9QQ34R;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -569,7 +612,7 @@
 				DEVELOPMENT_TEAM = MY2B9QQ34R;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -726,6 +769,15 @@
 			buildConfigurations = (
 				B1C2D3EB2F5000010057B50D /* Debug */,
 				B1C2D3EC2F5000010057B50D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D1B2C3D52F7000010057B50D /* Build configuration list for PBXAggregateTarget "Pods-Bootstrap" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D1B2C3D62F7000010057B50D /* Debug */,
+				D1B2C3D72F7000010057B50D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

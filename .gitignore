@@ -1,5 +1,11 @@
 .DS_Store
-Pods/
+Pods/*
+!Pods/Target Support Files/
+Pods/Target Support Files/*
+!Pods/Target Support Files/Pods-CallMate/
+Pods/Target Support Files/Pods-CallMate/*
+!Pods/Target Support Files/Pods-CallMate/Pods-CallMate.debug.xcconfig
+!Pods/Target Support Files/Pods-CallMate/Pods-CallMate.release.xcconfig
 xcuserdata/
 DerivedData/
 build/
