@@ -167,9 +167,12 @@ struct EchoCardPermissionsCard: View {
             if status == .undetermined {
                 row(
                     icon: "mic",
-                    title: t("允许麦克风", "Allow microphone"),
-                    subtitle: t("用于通话录音/语音交互。", "For call recording/voice input."),
-                    actionTitle: t("允许", "Allow"),
+                    title: t("麦克风", "Microphone"),
+                    subtitle: t(
+                        "用于语音输入。点「下一步」后，系统会询问是否允许访问麦克风，由你选择允许或拒绝。",
+                        "Used for voice input. Tap Next to open the system prompt, then allow or deny microphone access."
+                    ),
+                    actionTitle: t("下一步", "Next"),
                     action: {
                         Task { _ = await perms.requestMicrophone() }
                     }
@@ -188,9 +191,9 @@ struct EchoCardPermissionsCard: View {
             if status == .notDetermined {
                 row(
                     icon: "bell.badge",
-                    title: t("允许通知", "Allow notifications"),
-                    subtitle: t("用于紧急来电提醒。", "Used for urgent call alerts."),
-                    actionTitle: t("允许", "Allow"),
+                    title: t("通知", "Notifications"),
+                    subtitle: t("用于紧急来电提醒。点「继续」后系统将询问是否授权。", "Used for urgent call alerts. Tap Continue, then choose in the system prompt."),
+                    actionTitle: t("继续", "Continue"),
                     action: {
                         Task { _ = await perms.requestNotification() }
                     }

@@ -13,11 +13,9 @@ extension CallSessionController {
         Self.activeControllerId = controllerId
         Self.activeController = self
         audio.delegate = self
-        if permissions.networkStatus == .satisfied {
-            ws.addDelegate(self)
-        } else {
-            print("[CallSession] startFromIncomingCall: skip ws delegate due to network unavailable")
-        }
+        // Mic flows still call `ws.connect()` when NWPath is unsatisfied; never skip `addDelegate`
+        // or a live socket may exist with no delegate while `connect()` later early-returns.
+        ws.addDelegate(self)
         traceReset(reason: "start()")
         latencyManualSceneLog(
             "controller_start",
@@ -28,14 +26,14 @@ extension CallSessionController {
         Task { [weak self] in
             guard let self else { return }
             if self.inputSource == .microphone {
-                _ = await self.audio.requestMicrophonePermission()
-                self.latencyManualSceneLog("mic_permission_resolved")
-                // 默认启用外部扬声器并设置最大音量
-                // updateConfig/initConfig（AI 分身/引导页）不需要提前设置扬声器；
-                // TTS 播放时会通过 preparePlayback(playbackOnly:true) 走 .playback 类别自动出喇叭，
-                // 提前调 enableSpeaker 会把 session 切成 .voiceChat 激活距离传感器，导致声音从听筒出。
-                if self.scene == .call {
-                    self.audio.enableSpeaker(self.isSpeaker)
+                // init_config / update_config / evaluation / outbound_chat：按住说话时再请求麦克风（审核 + 体验）。
+                // `.call` 模拟通话仍在本阶段请求，便于接通后立即采集。
+                if !self.scene.isManualInteractionScene {
+                    _ = await self.audio.requestMicrophonePermission()
+                    self.latencyManualSceneLog("mic_permission_resolved")
+                    if self.scene == .call {
+                        self.audio.enableSpeaker(self.isSpeaker)
+                    }
                 }
             }
             if self.inputSource == .ble && self.contactPassthroughActive {
@@ -72,11 +70,7 @@ extension CallSessionController {
         Self.activeControllerId = controllerId
         Self.activeController = self
         audio.delegate = self
-        if permissions.networkStatus == .satisfied {
-            ws.addDelegate(self)
-        } else {
-            print("[CallSession] activatePendingCall: skip ws delegate due to network unavailable")
-        }
+        ws.addDelegate(self)
         // Offline local playback test should take over this call.
         if UserDefaults.standard.bool(forKey: "ble_local_uplink_test_armed") ||
             UserDefaults.standard.bool(forKey: "ble_local_uplink_test_in_progress") {
@@ -726,7 +720,7 @@ extension CallSessionController {
         // Delay audio engine start slightly to filter fast taps.
         // This avoids rapid AudioUnit start/stop churn (vpio render err -1).
         manualListenStartTask?.cancel()
-        manualListenStartTask = Task { [weak self] in
+        manualListenStartTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 80_000_000) // 80ms hold threshold (reduced from 150ms)
             guard let self, !Task.isCancelled else { return }
             guard self.scene.isManualInteractionScene else { return }
@@ -745,6 +739,25 @@ extension CallSessionController {
             }
             if self.monitorTTSOnPhone, self.audio.isPlaying {
                 self.audio.stopPlayback()
+            }
+            let micOK = await self.audio.requestMicrophonePermission()
+            // 系统授权对话框是模态的：用户可能在弹窗期间松开手指（endManualListen 已发了 listen_stop
+            // 并 cancel 了本任务，但 await 不会被打断）。授权返回后必须重新校验，否则会启动一个
+            // 孤儿录音，把 audio session 推到错误路由，导致后续 TTS 没声音、再次按住因为
+            // audio.isRecording==true 而被早返回。
+            guard !Task.isCancelled,
+                  self.manualPressActive,
+                  self.wsListeningStarted else {
+                print("[CallSession] manual listen: press released during mic prompt — skip startRecording")
+                self.manualListenStartTask = nil
+                return
+            }
+            guard micOK else {
+                print("[CallSession] manual listen: microphone permission denied — cancelling listen")
+                self.ws.sendListenStop()
+                self.wsListeningStarted = false
+                self.manualListenStartTask = nil
+                return
             }
             // 配置场景（update_config/init_config）不需要回声消除
             try? self.audio.startRecording(enableEchoCancellation: false)
