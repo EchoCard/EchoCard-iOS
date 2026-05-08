@@ -660,10 +660,9 @@
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "需要局域网权限用于与 EchoCard 桌面端通信。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "需要麦克风用于通话录音与语音交互。";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
-				INFOPLIST_KEY_NSVoIPUsageDescription = "EchoCard uses VoIP mode to run Bluetooth HFP latency testing and route call-style audio.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central remote-notification voip";
+				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central remote-notification";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
@@ -720,10 +719,9 @@
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "需要局域网权限用于与 EchoCard 桌面端通信。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "需要麦克风用于通话录音与语音交互。";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
-				INFOPLIST_KEY_NSVoIPUsageDescription = "EchoCard uses VoIP mode to run Bluetooth HFP latency testing and route call-style audio.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central remote-notification voip";
+				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central remote-notification";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
