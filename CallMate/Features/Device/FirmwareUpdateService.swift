@@ -14,6 +14,10 @@ enum FirmwareUpdateStage: Equatable {
     case rebooting
 }
 
+private enum FirmwareUpdateErrorCode {
+    static let slowOTALink = -13
+}
+
 struct FirmwareMetadata: Codable, Equatable {
     let device: String
     let version: String
@@ -136,6 +140,7 @@ final class FirmwareUpdateService: ObservableObject {
             // initial "spike" caused by the first few packets draining in <1 ms.
             var prevSentChunks = 0
             var prevPollTime = uploadStart
+            var didPassStartupSpeedGate = false
 
             // Initial sleep so the first reading has a meaningful time window.
             try? await Task.sleep(nanoseconds: 250_000_000)
@@ -166,6 +171,26 @@ final class FirmwareUpdateService: ObservableObject {
 
                 print(String(format: "[OTA] progress: sent=%d/%d  %.1f pkt/s × %dB = %.1f KB/s  (cumul %.1f KB/s)  remaining=%d",
                               sentChunks, totalChunks, pktPerSec, chunkSize, txKBps, cumulKBps, remaining))
+
+                // If iOS keeps the link at the 400 ms low-power interval, CoreBluetooth
+                // only opens a tiny write window every few hundred milliseconds. Abort
+                // early instead of spending 20-30 minutes uploading a full firmware.
+                if !didPassStartupSpeedGate {
+                    if txKBps >= 20 || cumulKBps >= 20 || sentChunks >= 300 {
+                        didPassStartupSpeedGate = true
+                        print(String(format: "[OTA] startup speed gate passed: inst=%.1f KB/s cumul=%.1f KB/s sent=%d",
+                                      txKBps, cumulKBps, sentChunks))
+                    } else if Date().timeIntervalSince(uploadStart) >= 8.0 {
+                        ble.resetOTADirectQueue()
+                        print(String(format: "[OTA] startup speed gate failed: inst=%.1f KB/s cumul=%.1f KB/s sent=%d; abort low-speed OTA",
+                                      txKBps, cumulKBps, sentChunks))
+                        throw NSError(
+                            domain: "fw",
+                            code: FirmwareUpdateErrorCode.slowOTALink,
+                            userInfo: [NSLocalizedDescriptionKey: "BLE link stayed in low-speed mode; aborting OTA"]
+                        )
+                    }
+                }
 
                 onSnapshot(OTAUploadSnapshot(sentBytes: sentChunks * chunkSize,
                                              sentChunks: sentChunks,
@@ -357,6 +382,7 @@ final class FirmwareUpdateService: ObservableObject {
             upgradeProgress = 0
             progress = 0
             statusText = t("正在准备升级，请保持设备靠近手机。", "Preparing update. Keep device near your phone.")
+            ble.setOTASessionActive(true, reason: "fw_begin")
             ble.sendCommand("fw_begin", uid: nil, extra: [
                 "size": firmwareData.count,
                 "crc32": Int(crc32),
@@ -375,15 +401,10 @@ final class FirmwareUpdateService: ObservableObject {
             }
             print("[FW] fw_begin ACK OK (result=\(beginAck!.result))")
 
-            // Wait for the MCU-initiated OTA connection parameter update (7.5 ms CI)
-            // to be accepted by iOS before starting the burst upload.
-            //
-            // After sending the fw_begin ACK the MCU calls ble_service_request_ota_conn_param()
-            // which asks iOS to switch CI from 15 ms to 7.5 ms.  iOS typically accepts within
-            // 1–2 CIs (15–30 ms), but the negotiation message itself takes ~one CI to arrive.
-            // Without this pause the first ~50 ms of the upload runs at the old CI, wasting 3–4
-            // connection events.  50 ms covers the worst common case without adding noticeable delay.
-            try? await Task.sleep(nanoseconds: 50_000_000)
+            // Give iOS time to apply the MCU-requested OTA connection parameters.
+            // If the link remains at 400 ms low-power CI, the upload speed gate below
+            // will abort quickly instead of letting a multi-megabyte update crawl.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             print("[FW] CI settle wait done, starting upload")
 
             // Step 3: Send chunks via dedicated OTA channel.
@@ -467,12 +488,25 @@ final class FirmwareUpdateService: ObservableObject {
             transferSpeedKBps = 0
             statusText = t("更新已发送，设备正在重启（约 5-10 秒）。", "Update sent. Device is rebooting (about 5-10s).")
             print("[FW] ====== OTA UPDATE COMPLETE ======")
+            ble.setOTASessionActive(false, reason: "complete")
         } catch {
+            ble.resetOTADirectQueue()
+            if (error as NSError).code == FirmwareUpdateErrorCode.slowOTALink {
+                ble.sendCommand("fw_abort", uid: nil, extra: [:], expectAck: false, sid: nil)
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                ble.forceReconnect()
+            }
+            ble.setOTASessionActive(false, reason: "failed")
             waitingForReconnectAfterUpdate = false
             updateStage = .idle
             transferSpeedKBps = 0
-            lastError = t("升级没有完成，请保持设备靠近手机后重试。", "Update did not complete. Keep the device near your phone and try again.")
-            statusText = t("升级未完成", "Update not completed")
+            if (error as NSError).code == FirmwareUpdateErrorCode.slowOTALink {
+                lastError = t("蓝牙链路仍处于低速模式，已中止本次升级并重新连接。请靠近设备后重试。", "BLE link stayed in low-speed mode. Update was aborted and the app is reconnecting. Keep the device nearby and try again.")
+                statusText = t("蓝牙链路低速，已中止并重连", "BLE link was slow; aborted and reconnecting")
+            } else {
+                lastError = t("升级没有完成，请保持设备靠近手机后重试。", "Update did not complete. Keep the device near your phone and try again.")
+                statusText = t("升级未完成", "Update not completed")
+            }
             print("[FW] ====== OTA UPDATE FAILED ======")
             print("[FW] Error: \(error)")
         }
