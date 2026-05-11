@@ -12,6 +12,9 @@ struct SettingsView: View {
     let setLanguage: (Language) -> Void
     let showBackButton: Bool
     let onBack: () -> Void
+    let onTest: () -> Void
+    let onLockScreenTest: () -> Void
+    let onSimulationCalls: (() -> Void)?
     let onDeviceManage: (() -> Void)?
     let onRebind: (() -> Void)?
     let onDeleteAllLocalData: () -> Void
@@ -41,6 +44,7 @@ struct SettingsView: View {
     @AppStorage("callmate.voiceDisplayNameOverride") private var voiceDisplayNameOverride: String = ""
 
     private enum SettingsRoute: Hashable, Identifiable {
+        case outboundContacts
         case outboundTemplates
 
         var id: Self { self }
@@ -51,6 +55,9 @@ struct SettingsView: View {
         setLanguage: @escaping (Language) -> Void,
         showBackButton: Bool,
         onBack: @escaping () -> Void,
+        onTest: @escaping () -> Void,
+        onLockScreenTest: @escaping () -> Void,
+        onSimulationCalls: (() -> Void)? = nil,
         onDeviceManage: (() -> Void)? = nil,
         onRebind: (() -> Void)? = nil,
         onDeleteAllLocalData: @escaping () -> Void,
@@ -62,6 +69,9 @@ struct SettingsView: View {
         self.setLanguage = setLanguage
         self.showBackButton = showBackButton
         self.onBack = onBack
+        self.onTest = onTest
+        self.onLockScreenTest = onLockScreenTest
+        self.onSimulationCalls = onSimulationCalls
         self.onDeviceManage = onDeviceManage
         self.onRebind = onRebind
         self.onDeleteAllLocalData = onDeleteAllLocalData
@@ -111,9 +121,18 @@ struct SettingsView: View {
                                 showPromptModal = true
                             }
                         },
+                        onOutboundContactsTap: {
+                            navigationRoute = .outboundContacts
+                        },
                         onOutboundTemplatesTap: {
                             navigationRoute = .outboundTemplates
                         }
+                    )
+                    SettingsTestingSectionView(
+                        language: language,
+                        onTest: onTest,
+                        onLockScreenTest: onLockScreenTest,
+                        onSimulationCalls: onSimulationCalls
                     )
                     deleteAllLocalDataSection
                 }
@@ -143,6 +162,8 @@ struct SettingsView: View {
             }
             .navigationDestination(item: $navigationRoute) { route in
                 switch route {
+                case .outboundContacts:
+                    OutboundContactsManagementView(language: language)
                 case .outboundTemplates:
                     OutboundTemplateSettingsView(language: language)
                 }
@@ -164,6 +185,7 @@ struct SettingsView: View {
                 language: language,
                 feedbackType: "none",
                 onClose: { showAiChat = false },
+                onTest: nil,
                 initialMessages: nil,
                 showInitialMessage: false,
                 initMessagesOverride: [

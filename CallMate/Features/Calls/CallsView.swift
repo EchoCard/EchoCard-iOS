@@ -197,10 +197,15 @@ struct CallsView: View {
     @State private var showSettings = false
     @State private var showVoiceToneInSettings = false
     @State private var showPromptRulesInSettings = false
+    @State private var showSimulationView = false
+    @State private var showLockScreenSim = false
+    @State private var showSimulationCalls = false
     @State private var isConnectingEchoCard = false
     @State private var echoCardConnectDeadline: Date?
     @State private var echoCardConnectTask: Task<Void, Never>?
     @State private var selectedDetail: CallLog?
+    @State private var selectedTestReport: CallLog?
+    @State private var simulationCallDetail: CallLog?
     @State private var recentCallsVisibleCount = 10
     private let recentCallsPageSize = 10
     @State private var callListFilter: CallListFilter = .all
@@ -209,7 +214,7 @@ struct CallsView: View {
     @State private var callToDelete: CallLog?
 
     private var isShowingSubView: Bool {
-        showSettings || selectedDetail != nil
+        showSettings || showSimulationView || showLockScreenSim || showSimulationCalls || selectedDetail != nil || selectedTestReport != nil || simulationCallDetail != nil
     }
 
     private var isOnHomePage: Bool {
@@ -242,6 +247,11 @@ struct CallsView: View {
     }
 
     private func closeSettings() {
+        showSimulationView = false
+        showLockScreenSim = false
+        showSimulationCalls = false
+        selectedTestReport = nil
+        simulationCallDetail = nil
         showSettings = false
     }
 
@@ -251,6 +261,18 @@ struct CallsView: View {
             setLanguage: setLanguage,
             showBackButton: true,
             onBack: { withAnimation(.easeInOut(duration: 0.25)) { closeSettings() } },
+            onTest: {
+                guard guardMCUReadyOrToast() else { return }
+                withAnimation(.easeInOut(duration: 0.25)) { showSimulationView = true }
+            },
+            onLockScreenTest: {
+                guard guardMCUReadyOrToast() else { return }
+                withAnimation(.easeInOut(duration: 0.25)) { showLockScreenSim = true }
+            },
+            onSimulationCalls: {
+                guard guardMCUReadyOrToast() else { return }
+                withAnimation(.easeInOut(duration: 0.25)) { simulationCallDetail = nil; showSimulationCalls = true }
+            },
             onDeviceManage: { withAnimation(.easeInOut(duration: 0.25)) { showDeviceModal = true } },
             onRebind: onRebind,
             onDeleteAllLocalData: onDeleteAllLocalData,
@@ -266,7 +288,7 @@ struct CallsView: View {
 
             if showSettings {
                 // Overlays rendered outside settingsLayerView — disable its hit testing entirely
-                let hasExternalChildLayer = showDeviceModal
+                let hasExternalChildLayer = showSimulationView || showLockScreenSim || showSimulationCalls || selectedTestReport != nil || simulationCallDetail != nil || showDeviceModal
                 // Any sub-page open (including voice tone / prompt rules rendered inside settings) — disable swipe-back
                 let hasAnyChildLayer = hasExternalChildLayer || showVoiceToneInSettings || showPromptRulesInSettings
                 settingsLayerView
@@ -276,6 +298,52 @@ struct CallsView: View {
                         perform: { closeSettings() }
                     )
                     .transition(.move(edge: .trailing))
+            }
+
+            if showSimulationView {
+                SimulationView(language: language) { savedCall in
+                    showSimulationView = false
+                    selectedTestReport = savedCall
+                }
+                .allowsHitTesting(selectedTestReport == nil)
+                .edgeSwipeBack(perform: { showSimulationView = false })
+                .transition(.move(edge: .trailing))
+            }
+
+            if showLockScreenSim {
+                LockScreenSimulationView(language: language) {
+                    withAnimation(.easeInOut(duration: 0.25)) { showLockScreenSim = false }
+                }
+                .edgeSwipeBack(perform: { showLockScreenSim = false })
+                .transition(.move(edge: .trailing))
+            }
+
+            if showSimulationCalls {
+                AllCallsView(
+                    language: language,
+                    onBack: { withAnimation(.easeInOut(duration: 0.25)) { showSimulationCalls = false } },
+                    onCallClick: { call in withAnimation(.easeInOut(duration: 0.25)) { simulationCallDetail = call } },
+                    mode: .simulationOnly
+                )
+                .allowsHitTesting(simulationCallDetail == nil)
+                .edgeSwipeBack(perform: { showSimulationCalls = false })
+                .transition(.move(edge: .trailing))
+            }
+
+            if let call = selectedTestReport {
+                CallDetailView(call: call, language: language, isTest: true, onBack: {
+                    withAnimation(.easeInOut(duration: 0.25)) { selectedTestReport = nil }
+                })
+                .edgeSwipeBack(perform: { selectedTestReport = nil })
+                .transition(.move(edge: .trailing))
+            }
+
+            if let call = simulationCallDetail {
+                CallDetailView(call: call, language: language, isTest: true, onBack: {
+                    withAnimation(.easeInOut(duration: 0.25)) { simulationCallDetail = nil }
+                })
+                .edgeSwipeBack(perform: { simulationCallDetail = nil })
+                .transition(.move(edge: .trailing))
             }
 
             if let call = selectedDetail {
@@ -364,7 +432,12 @@ struct CallsView: View {
     private var animatedContentLayer: some View {
         contentLayer
             .animation(.easeInOut(duration: 0.25), value: showSettings)
+            .animation(.easeInOut(duration: 0.25), value: showSimulationView)
+            .animation(.easeInOut(duration: 0.25), value: showLockScreenSim)
+            .animation(.easeInOut(duration: 0.25), value: showSimulationCalls)
             .animation(.easeInOut(duration: 0.25), value: selectedDetail?.id)
+            .animation(.easeInOut(duration: 0.25), value: selectedTestReport?.id)
+            .animation(.easeInOut(duration: 0.25), value: simulationCallDetail?.id)
             .animation(.easeInOut(duration: 0.25), value: showDeviceModal)
     }
 
@@ -375,6 +448,12 @@ struct CallsView: View {
                     language: language,
                     feedbackType: "none",
                     onClose: { showAiChat = false },
+                    onTest: {
+                        guard guardMCUReadyOrToast() else { return }
+                        CallSessionController.sharedStopCurrentSession()
+                        showAiChat = false
+                        showSimulationView = true
+                    },
                     showInitialMessage: false,
                     initMessagesOverride: [
                         ["role": "user", "content": "你好"],
@@ -1330,6 +1409,16 @@ struct CallsView: View {
                     .foregroundColor(AppColors.textSecondary)
                     .multilineTextAlignment(.center)
             }
+
+            Button {
+                guard guardMCUReadyOrToast() else { return }
+                withAnimation(.easeInOut(duration: 0.25)) { showSimulationView = true }
+            } label: {
+                Text(t("模拟通话测试", "Try Simulation"))
+                    .font(AppTypography.bodyEmphasized)
+                    .foregroundColor(AppColors.primary)
+            }
+            .buttonStyle(.plain)
             .padding(.bottom, AppSpacing.xxl)
         }
         .frame(maxWidth: .infinity)

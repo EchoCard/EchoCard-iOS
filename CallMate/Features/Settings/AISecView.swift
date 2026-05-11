@@ -17,6 +17,7 @@ struct AISecView: View {
     @Query(sort: \OutboundPromptTemplate.updatedAt, order: .reverse) private var promptTemplates: [OutboundPromptTemplate]
     @StateObject private var voiceControl = FeedbackVoiceControl()
     @StateObject private var queueService = OutboundTaskQueueService.shared
+    @State private var showSimulationView = false
     @State private var isSoundEnabled = true
     @State private var showOutboundAssistant = false
     @State private var showCreateTaskSheet = false
@@ -39,6 +40,8 @@ struct AISecView: View {
                     isEmbedded: true,
                     voiceControl: voiceControl,
                     showCloseButton: false,
+                    onTest: { showSimulationView = true },
+                    useTextStyleTestButton: true,
                     initialMessages: [
                         ExtendedMessage(
                             id: Int.random(in: 10000...99999),
@@ -263,6 +266,11 @@ struct AISecView: View {
             lastOutboundRiskAlertAt = now
             nextAlertMessage = msg
             queueService.clearOutboundDialBlockedMessage()
+        }
+        .fullScreenCover(isPresented: $showSimulationView) {
+            SimulationView(language: language) { _ in
+                showSimulationView = false
+            }
         }
     }
 

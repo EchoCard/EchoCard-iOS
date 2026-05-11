@@ -174,6 +174,8 @@ struct FeedbackChatModalView: View {
     var inlineMessagesMode: Bool = false
     var voiceControl: FeedbackVoiceControl? = nil
     var showCloseButton: Bool = true
+    var onTest: (() -> Void)? = nil
+    var useTextStyleTestButton: Bool = false
     var initialMessages: [ExtendedMessage]? = nil
     var showInitialMessage: Bool = true
     var initMessagesOverride: [[String: String]]? = nil
@@ -209,6 +211,7 @@ struct FeedbackChatModalView: View {
     @StateObject private var controller: CallSessionController
     @State private var recordStartAt: Date?
     @State private var lastStopAt: Date?
+    @State private var isTransitioningToTest = false
     @State private var now = Date()
     @State private var isVoiceCancelling = false
     @State private var hasPersistedContext = false
@@ -230,15 +233,18 @@ struct FeedbackChatModalView: View {
     private var avatarQuickActions: [AvatarQuickAction] {
         [
             AvatarQuickAction(
+                id: "outbound_call",
+                title: t("AI打电话", "AI Calling"),
+                icon: "phone.arrow.up.right",
+                prompt: t("我想让你帮我打一通电话", "I want you to help me place a call")
+            ),
+            AvatarQuickAction(
                 id: "call_rules",
                 title: t("接听规则调整", "Update Call Rules"),
                 icon: "slider.horizontal.3",
                 prompt: t("帮我调整接听规则", "Help me adjust the call answering rules")
             )
         ]
-    }
-    private var shouldShowAvatarQuickActions: Bool {
-        isEmbedded && scene == .updateConfig && !isRecording
     }
 
     /// In inline mode with external voice control, parent view owns the recording overlay.
@@ -251,6 +257,29 @@ struct FeedbackChatModalView: View {
         scene == .updateConfig || scene == .evaluation
     }
 
+    private var shouldShowAvatarQuickActions: Bool {
+        isEmbedded && shouldShowAvatarChatBackground && !isRecording
+    }
+
+    private func triggerTest() {
+        guard let onTest else { return }
+        isTransitioningToTest = true
+        let tappedAt = Date()
+        print("[LAT][SimTap] t=\(CallSessionController.logDateFormatter.string(from: tappedAt)) event=test_tap scene=\(scene.rawValue)")
+        Task { @MainActor in
+            // Let the pressed-state UI commit before we tear down the current session.
+            await Task.yield()
+            let teardownStartedAt = Date()
+            print("[LAT][SimTap] t=\(CallSessionController.logDateFormatter.string(from: teardownStartedAt)) event=teardown_begin scene=\(scene.rawValue)")
+            controller.end(abortReason: "simulate_call_transition")
+            let teardownDurationMs = Int(Date().timeIntervalSince(teardownStartedAt) * 1000)
+            print("[LAT][SimTap] t=\(CallSessionController.logDateFormatter.string(from: Date())) event=teardown_end scene=\(scene.rawValue) duration=\(teardownDurationMs)ms")
+            onTest()
+            let totalDurationMs = Int(Date().timeIntervalSince(tappedAt) * 1000)
+            print("[LAT][SimTap] t=\(CallSessionController.logDateFormatter.string(from: Date())) event=present_requested scene=\(scene.rawValue) duration=\(totalDurationMs)ms")
+        }
+    }
+
     init(
         language: Language,
         feedbackType: String,
@@ -260,6 +289,8 @@ struct FeedbackChatModalView: View {
         inlineMessagesMode: Bool = false,
         voiceControl: FeedbackVoiceControl? = nil,
         showCloseButton: Bool = true,
+        onTest: (() -> Void)? = nil,
+        useTextStyleTestButton: Bool = false,
         initialMessages: [ExtendedMessage]? = nil,
         showInitialMessage: Bool = true,
         initMessagesOverride: [[String: String]]? = nil,
@@ -281,6 +312,8 @@ struct FeedbackChatModalView: View {
         self.inlineMessagesMode = inlineMessagesMode
         self.voiceControl = voiceControl
         self.showCloseButton = showCloseButton
+        self.onTest = onTest
+        self.useTextStyleTestButton = useTextStyleTestButton
         self.showInitialMessage = showInitialMessage
         self.initMessagesOverride = initMessagesOverride
         self.evaluationChatHistoryOverride = evaluationChatHistoryOverride
@@ -398,6 +431,10 @@ struct FeedbackChatModalView: View {
                 "view_on_appear",
                 extra: "view=FeedbackChatModalView autoPlayIntro=\(autoPlayIntro) existingMessages=\(messages.count)"
             )
+            if onTest != nil {
+                CallToneService.shared.prewarmToneAssetsIfNeeded()
+                CallAudioStore.prewarmRecordingsDirectoryIfNeeded()
+            }
             let startInitMessages = sessionInitMessages()
             print("[AIChat][Start] hasPersistedContext=\(hasPersistedContext) currentUIMessageCount=\(messages.count) startInitCount=\(startInitMessages?.count ?? 0) autoPlayIntro=\(autoPlayIntro)")
             print("[AIChat][Start] startInitPreview=\(debugInitMessagesPreview(startInitMessages))")
@@ -418,7 +455,9 @@ struct FeedbackChatModalView: View {
             if isRecording {
                 endVoiceMessage()
             }
-            controller.end()
+            if !isTransitioningToTest {
+                controller.end()
+            }
             }
             .onChange(of: isSoundEnabled?.wrappedValue) { _, newValue in
                 if let enabled = newValue {
@@ -649,6 +688,13 @@ struct FeedbackChatModalView: View {
                     Button(action: onClose) {
                         Image(systemName: "xmark")
                             .font(DS.Typography.body)
+                    }
+                }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                if onTest != nil {
+                    Button(t("模拟通话", "Simulate")) {
+                        triggerTest()
                     }
                 }
             }
@@ -910,7 +956,8 @@ struct FeedbackChatModalView: View {
                     language: language,
                     onConfirm: { handleConfirmProposal(msgId: msg.id) },
                     onCancel: { handleCancelProposal(msgId: msg.id) },
-                    onRetry: { handleRetryProposal(msgId: msg.id) }
+                    onRetry: { handleRetryProposal(msgId: msg.id) },
+                    onTest: onTest != nil ? { triggerTest() } : nil
                 )
                 .frame(maxWidth: 320)
             }
@@ -966,6 +1013,40 @@ struct FeedbackChatModalView: View {
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.card).stroke(AppColors.border, lineWidth: 1))
             .modifier(ChatBubbleLongPressCopy(text: msg.text))
+
+            if onTest != nil {
+                if useTextStyleTestButton {
+                    Button {
+                        triggerTest()
+                    } label: {
+                        HStack(spacing: DS.Spacing.x1) {
+                            Text(t("模拟测试", "Simulation Test"))
+                            Image(systemName: "chevron.right")
+                                .font(DS.Typography.caption.weight(.semibold))
+                        }
+                        .font(DS.Typography.body)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(AppColors.primary)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        triggerTest()
+                    } label: {
+                        HStack {
+                            Image(systemName: "play.fill")
+                            Text(t("立即模拟来电", "Test Now"))
+                        }
+                        .font(DS.Typography.body)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, DS.Spacing.x3)
+                        .padding(.vertical, DS.Spacing.x2)
+                        .background(AppColors.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1717,9 +1798,11 @@ private struct ProposalGlassCard: View {
     let onConfirm: () -> Void
     let onCancel: () -> Void
     let onRetry: () -> Void
+    var onTest: (() -> Void)? = nil
 
     private var config: ProposalCategoryConfig { proposalConfigFor(proposal.title) }
     private var isFailed: Bool { status == .failed }
+    private var isApplied: Bool { status == .applied }
 
     private var cardBgGradient: LinearGradient {
         switch status {
@@ -1822,10 +1905,37 @@ private struct ProposalGlassCard: View {
             .frame(width: 50, height: 50)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(config.displayTitle)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Color(hex: "1D1D1F"))
-                    .tracking(-0.4)
+                HStack(spacing: 8) {
+                    Text(config.displayTitle)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(Color(hex: "1D1D1F"))
+                        .tracking(-0.4)
+
+                    Spacer(minLength: 0)
+
+                    if isApplied, let onTest {
+                        Button(action: onTest) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 9, weight: .semibold))
+                                Text(language == .zh ? "模拟测试" : "Test")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color(hex: "007AFF"), Color(hex: "5856D6")],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            )
+                            .clipShape(Capsule())
+                            .shadow(color: Color(hex: "007AFF").opacity(0.2), radius: 4, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
 
                 statusBadge
             }

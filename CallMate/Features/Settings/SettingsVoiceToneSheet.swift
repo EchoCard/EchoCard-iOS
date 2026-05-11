@@ -3,7 +3,7 @@ import AVFoundation
 
 struct VoiceToneSelectionSheet: View {
     /// 为 `false` 时隐藏「我的声音」标题/卡片与「克隆我的声音」按钮；克隆与同步相关逻辑仍执行。
-    private static let showMyVoiceCloneSectionUI = false
+    private static let showMyVoiceCloneSectionUI = true
 
     private struct VoiceListItem: Identifiable, Equatable {
         let id: String

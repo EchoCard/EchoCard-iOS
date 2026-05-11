@@ -189,6 +189,7 @@ struct SettingsGeneralSectionView: View {
 struct SettingsAIConfigSectionView: View {
     let language: Language
     let onPromptRulesTap: () -> Void
+    let onOutboundContactsTap: () -> Void
     let onOutboundTemplatesTap: () -> Void
 
     private func t(_ zh: String, _ en: String) -> String {
@@ -211,6 +212,14 @@ struct SettingsAIConfigSectionView: View {
                     title: t("接听规则", "Call Rules"),
                     subtitle: t("查看完整的 AI 指令", "View full AI instructions"),
                     action: onPromptRulesTap
+                )
+
+                aiConfigRow(
+                    icon: "person.2",
+                    iconColor: AppColors.primary,
+                    title: t("外呼白名单", "Outbound Whitelist"),
+                    subtitle: t("管理 AI 外呼联系人", "Manage outbound call contacts"),
+                    action: onOutboundContactsTap
                 )
 
                 aiConfigRow(
@@ -264,5 +273,81 @@ struct SettingsAIConfigSectionView: View {
             .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Testing Section
+
+struct SettingsTestingSectionView: View {
+    let language: Language
+    let onTest: () -> Void
+    let onLockScreenTest: () -> Void
+    let onSimulationCalls: (() -> Void)?
+
+    private func t(_ zh: String, _ en: String) -> String {
+        language == .zh ? zh : en
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(t("测试工具", "Testing"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color(lightHex: "6B7280", darkHex: "9CA3AF"))
+                .textCase(.uppercase)
+                .tracking(1.2)
+                .padding(.leading, 16)
+
+            VStack(spacing: 12) {
+                Button(action: onTest) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 18))
+                        Text(t("模拟陌生来电", "Simulate Call"))
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color(hex: "007AFF"))
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+                }
+                .buttonStyle(.plain)
+
+                Button(action: onLockScreenTest) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "lock.iphone")
+                            .font(.system(size: 16))
+                        Text(t("锁屏模拟来电", "Lock Screen Simulation"))
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .foregroundColor(AppColors.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(AppColors.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+                }
+                .buttonStyle(.plain)
+
+                if let onSimulationCalls {
+                    Button(action: onSimulationCalls) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 16))
+                            Text(t("模拟测试通话记录", "Simulation Call History"))
+                                .font(.system(size: 17, weight: .semibold))
+                        }
+                        .foregroundColor(AppColors.textPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(AppColors.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 }
