@@ -239,6 +239,12 @@ struct FeedbackChatModalView: View {
                 prompt: t("我想让你帮我打一通电话", "I want you to help me place a call")
             ),
             AvatarQuickAction(
+                id: "restaurant_booking",
+                title: t("餐厅订位", "Restaurant Booking"),
+                icon: "fork.knife",
+                prompt: t("帮我预订一家餐厅", "Help me book a restaurant")
+            ),
+            AvatarQuickAction(
                 id: "call_rules",
                 title: t("接听规则调整", "Update Call Rules"),
                 icon: "slider.horizontal.3",
