@@ -281,7 +281,6 @@ struct SettingsAIConfigSectionView: View {
 struct SettingsTestingSectionView: View {
     let language: Language
     let onTest: () -> Void
-    let onLockScreenTest: () -> Void
     let onSimulationCalls: (() -> Void)?
 
     private func t(_ zh: String, _ en: String) -> String {
@@ -309,22 +308,6 @@ struct SettingsTestingSectionView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
                     .background(Color(hex: "007AFF"))
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
-                }
-                .buttonStyle(.plain)
-
-                Button(action: onLockScreenTest) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "lock.iphone")
-                            .font(.system(size: 16))
-                        Text(t("锁屏模拟来电", "Lock Screen Simulation"))
-                            .font(.system(size: 17, weight: .semibold))
-                    }
-                    .foregroundColor(AppColors.textPrimary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(AppColors.surface)
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                     .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
                 }

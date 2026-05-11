@@ -13,7 +13,6 @@ struct SettingsView: View {
     let showBackButton: Bool
     let onBack: () -> Void
     let onTest: () -> Void
-    let onLockScreenTest: () -> Void
     let onSimulationCalls: (() -> Void)?
     let onDeviceManage: (() -> Void)?
     let onRebind: (() -> Void)?
@@ -56,7 +55,6 @@ struct SettingsView: View {
         showBackButton: Bool,
         onBack: @escaping () -> Void,
         onTest: @escaping () -> Void,
-        onLockScreenTest: @escaping () -> Void,
         onSimulationCalls: (() -> Void)? = nil,
         onDeviceManage: (() -> Void)? = nil,
         onRebind: (() -> Void)? = nil,
@@ -70,7 +68,6 @@ struct SettingsView: View {
         self.showBackButton = showBackButton
         self.onBack = onBack
         self.onTest = onTest
-        self.onLockScreenTest = onLockScreenTest
         self.onSimulationCalls = onSimulationCalls
         self.onDeviceManage = onDeviceManage
         self.onRebind = onRebind
@@ -131,7 +128,6 @@ struct SettingsView: View {
                     SettingsTestingSectionView(
                         language: language,
                         onTest: onTest,
-                        onLockScreenTest: onLockScreenTest,
                         onSimulationCalls: onSimulationCalls
                     )
                     deleteAllLocalDataSection
