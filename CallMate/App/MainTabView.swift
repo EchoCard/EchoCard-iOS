@@ -19,8 +19,6 @@ struct MainTabView: View {
 
     @State private var showAISheet = false
     @State private var showAIFabOnHome = true
-    @State private var mainTab: Int = 0
-    @State private var callsViewReportsOnHome = true
 
     @MainActor
     init(
@@ -43,39 +41,20 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            TabView(selection: $mainTab) {
-                CallsView(
-                    language: language,
-                    setLanguage: setLanguage,
-                    onDisconnect: onDisconnect,
-                    onFactoryReset: onFactoryReset,
-                    onDeleteAllLocalData: onDeleteAllLocalData,
-                    onRebind: onRebind,
-                    showsSettingsShortcut: true,
-                    showsAIFab: false,
-                    liveTranscriptRouter: liveTranscriptRouter,
-                    onHomeVisibilityChange: { isOnHome in
-                        callsViewReportsOnHome = isOnHome
-                        showAIFabOnHome = (mainTab == 0) && isOnHome
-                    }
-                )
-                .tabItem {
-                    Label(t("接听", "Receive"), systemImage: "phone.arrow.down.left")
+            CallsView(
+                language: language,
+                setLanguage: setLanguage,
+                onDisconnect: onDisconnect,
+                onFactoryReset: onFactoryReset,
+                onDeleteAllLocalData: onDeleteAllLocalData,
+                onRebind: onRebind,
+                showsSettingsShortcut: true,
+                showsAIFab: false,
+                liveTranscriptRouter: liveTranscriptRouter,
+                onHomeVisibilityChange: { isOnHome in
+                    showAIFabOnHome = isOnHome
                 }
-                .tag(0)
-
-                OutboundCallsView(
-                    language: language,
-                    onBack: nil,
-                    onDisconnect: onDisconnect,
-                    onFactoryReset: onFactoryReset,
-                    onRebind: onRebind
-                )
-                .tabItem {
-                    Label(t("外呼", "Call Out"), systemImage: "phone.arrow.up.right")
-                }
-                .tag(1)
-            }
+            )
 
             if !showAISheet && showAIFabOnHome {
                 aiFab
@@ -95,9 +74,6 @@ struct MainTabView: View {
             if showAISheet {
                 showAISheet = false
             }
-        }
-        .onChange(of: mainTab) { _, newTab in
-            showAIFabOnHome = (newTab == 0) && callsViewReportsOnHome
         }
     }
 
