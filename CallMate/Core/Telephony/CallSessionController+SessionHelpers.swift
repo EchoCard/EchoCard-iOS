@@ -14,6 +14,14 @@ extension CallSessionController {
         return shouldBlock
     }
 
+    /// MCU `hangup` / `audio_stop` often drops BLE briefly; `CallMateBLEKit` otherwise registers an
+    /// immediate `central.connect()` on `didDisconnect`, which looks like an unwanted reconnect
+    /// while the app is still running the cloud-driven hangup / `end()` path.
+    func suppressBLEAutoReconnectBeforeIntentionalMCUHangup(reason: String) {
+        guard inputSource == .ble else { return }
+        ble.suppressAutoReconnect(for: 5.0, reason: reason)
+    }
+
     func applyPhoneIDContextForWS() {
         if scene == .call {
             if inputSource == .ble {

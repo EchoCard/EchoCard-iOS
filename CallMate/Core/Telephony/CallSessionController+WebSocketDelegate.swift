@@ -226,6 +226,7 @@ extension CallSessionController: WebSocketServiceDelegate {
             return true
         case .noHelloHangupAndEnd:
             print("[CallSession] WS no-hello retries exhausted in active AI context -> hangup MCU")
+            suppressBLEAutoReconnectBeforeIntentionalMCUHangup(reason: "ws_no_hello_hangup")
             sendCallCommand("audio_stop", expectAck: false)
             sendCallCommand("hangup", expectAck: false)
             end()
@@ -250,6 +251,7 @@ extension CallSessionController: WebSocketServiceDelegate {
             return true
         case .disconnectHangupAndEnd:
             print("[CallSession] WS disconnected in active call context -> hangup MCU")
+            suppressBLEAutoReconnectBeforeIntentionalMCUHangup(reason: "ws_disconnect_hangup")
             sendCallCommand("audio_stop", expectAck: false)
             sendCallCommand("hangup", expectAck: false)
             return false
@@ -1088,6 +1090,7 @@ extension CallSessionController: WebSocketServiceDelegate {
                 if self.shouldSuppressBLEHangup {
                     print("[CallSession] AI hangup suppressed due to passthrough")
                 } else {
+                    self.suppressBLEAutoReconnectBeforeIntentionalMCUHangup(reason: "ai_hangup")
                     self.sendCallCommand("hangup", expectAck: false)
                     self.sendCallCommand("audio_stop", expectAck: false)
                 }
