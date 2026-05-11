@@ -259,8 +259,10 @@ class WebSocketService: NSObject, ObservableObject {
     
     static let shared = WebSocketService()
 
-  
-    
+    /// 未收到服务端 JSON `hello`（`helloAcked`）时，相邻两次 `sendHello` 的间隔。
+    /// 过小易在慢链路/大 payload（如 `update_config`）下重复发 hello；过大则失败感知变慢。
+    private static let helloRetrySleepNanoseconds: UInt64 = 3 * 1_000_000_000
+
     // MARK: - 配置
     private let wsURL = URL(string: AppConfig.wsBaseURL)!
     private let protocolVersion = "1"
@@ -575,7 +577,7 @@ class WebSocketService: NSObject, ObservableObject {
                         if service.helloAcked { return }
                         print("[WS] send hello attempt=\(attempt)")
                         service.sendHello()
-                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        try? await Task.sleep(nanoseconds: Self.helloRetrySleepNanoseconds)
                     }
                     if !service.helloAcked {
                         print("[WS] hello timeout after 3 attempts, disconnecting")
