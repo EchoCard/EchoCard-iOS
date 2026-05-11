@@ -43,7 +43,6 @@ struct SettingsView: View {
     @AppStorage("callmate.voiceDisplayNameOverride") private var voiceDisplayNameOverride: String = ""
 
     private enum SettingsRoute: Hashable, Identifiable {
-        case outboundContacts
         case outboundTemplates
 
         var id: Self { self }
@@ -118,9 +117,6 @@ struct SettingsView: View {
                                 showPromptModal = true
                             }
                         },
-                        onOutboundContactsTap: {
-                            navigationRoute = .outboundContacts
-                        },
                         onOutboundTemplatesTap: {
                             navigationRoute = .outboundTemplates
                         }
@@ -158,8 +154,6 @@ struct SettingsView: View {
             }
             .navigationDestination(item: $navigationRoute) { route in
                 switch route {
-                case .outboundContacts:
-                    OutboundContactsManagementView(language: language)
                 case .outboundTemplates:
                     OutboundTemplateSettingsView(language: language)
                 }

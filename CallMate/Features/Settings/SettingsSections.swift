@@ -189,7 +189,6 @@ struct SettingsGeneralSectionView: View {
 struct SettingsAIConfigSectionView: View {
     let language: Language
     let onPromptRulesTap: () -> Void
-    let onOutboundContactsTap: () -> Void
     let onOutboundTemplatesTap: () -> Void
 
     private func t(_ zh: String, _ en: String) -> String {
@@ -212,14 +211,6 @@ struct SettingsAIConfigSectionView: View {
                     title: t("接听规则", "Call Rules"),
                     subtitle: t("查看完整的 AI 指令", "View full AI instructions"),
                     action: onPromptRulesTap
-                )
-
-                aiConfigRow(
-                    icon: "person.2",
-                    iconColor: AppColors.primary,
-                    title: t("外呼白名单", "Outbound Whitelist"),
-                    subtitle: t("管理 AI 外呼联系人", "Manage outbound call contacts"),
-                    action: onOutboundContactsTap
                 )
 
                 aiConfigRow(
