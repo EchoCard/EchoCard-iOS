@@ -1394,16 +1394,6 @@ struct CallsView: View {
                     .foregroundColor(AppColors.textSecondary)
                     .multilineTextAlignment(.center)
             }
-
-            Button {
-                guard guardMCUReadyOrToast() else { return }
-                withAnimation(.easeInOut(duration: 0.25)) { showSimulationView = true }
-            } label: {
-                Text(t("模拟通话测试", "Try Simulation"))
-                    .font(AppTypography.bodyEmphasized)
-                    .foregroundColor(AppColors.primary)
-            }
-            .buttonStyle(.plain)
             .padding(.bottom, AppSpacing.xxl)
         }
         .frame(maxWidth: .infinity)
