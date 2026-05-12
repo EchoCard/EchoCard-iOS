@@ -390,7 +390,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 248;
+				CURRENT_PROJECT_VERSION = 249;
 				DEVELOPMENT_TEAM = Q322S2LD93;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "CallMateLiveActivity-Info.plist";
@@ -400,7 +400,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.9.234;
+				MARKETING_VERSION = 1.9.235;
 				PRODUCT_BUNDLE_IDENTIFIER = greater.longshu.CallMateTool.LiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -417,7 +417,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 248;
+				CURRENT_PROJECT_VERSION = 249;
 				DEVELOPMENT_TEAM = Q322S2LD93;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "CallMateLiveActivity-Info.plist";
@@ -427,7 +427,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.9.234;
+				MARKETING_VERSION = 1.9.235;
 				PRODUCT_BUNDLE_IDENTIFIER = greater.longshu.CallMateTool.LiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -443,7 +443,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 248;
+				CURRENT_PROJECT_VERSION = 249;
 				DEVELOPMENT_TEAM = Q322S2LD93;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
@@ -470,7 +470,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 248;
+				CURRENT_PROJECT_VERSION = 249;
 				DEVELOPMENT_TEAM = Q322S2LD93;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
@@ -642,7 +642,7 @@
 				CODE_SIGN_ENTITLEMENTS = CallMate/CallMate.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 248;
+				CURRENT_PROJECT_VERSION = 249;
 				DEVELOPMENT_TEAM = Q322S2LD93;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -671,7 +671,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9.234;
+				MARKETING_VERSION = 1.9.235;
 				PRODUCT_BUNDLE_IDENTIFIER = greater.longshu.CallMateTool;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -701,7 +701,7 @@
 				CODE_SIGN_ENTITLEMENTS = CallMate/CallMateRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 248;
+				CURRENT_PROJECT_VERSION = 249;
 				DEVELOPMENT_TEAM = Q322S2LD93;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -730,7 +730,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9.234;
+				MARKETING_VERSION = 1.9.235;
 				PRODUCT_BUNDLE_IDENTIFIER = greater.longshu.CallMateTool;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
