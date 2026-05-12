@@ -319,19 +319,25 @@ extension CallSessionController: WebSocketServiceDelegate {
         messages.append(.init(text: text, isAI: false))
     }
 
-    /// 手机监听下行：`tts start` 可能晚于首包 Opus；`scene=call` 时还有连续背景流。播放管线须在未 `isPlaying` 时按帧补建（亦覆盖 `init_config` 等麦克风监听场景）。
+    /// 手机监听下行：`tts start` 可能晚于首包 Opus；`scene=call` 时还有连续背景流。
+    /// 播放管线须在未真正运行时按帧补建（亦覆盖 `init_config` 等麦克风监听场景）。
+    ///
+    /// 注意：判断必须基于「引擎在 running + player 仍 attached」，而非 `isPlaying` 标志。
+    /// 中断 / 路由切换时 `AVAudioEngine` 会被悄悄停掉而 `isPlaying` 还是 true，
+    /// 那种状态下早 return 会导致 `playOpusData` 一直被 drop（[CloudAudioProof] LOCAL_playOpus_skipped_not_prepared）。
     private func ensureSimMicCloudDownlinkPlaybackReady(reason: String) {
         guard monitorTTSOnPhone, inputSource == .microphone else { return }
-        if audioRouter.isPlaying() { return }
+        if audioRouter.isPlaybackPipelineHealthy() { return }
         let sr = max(8000, currentTTSSampleRate > 0 ? currentTTSSampleRate : ws.downstreamSampleRate)
         let playbackOnly = scene.isManualInteractionScene
-        // 连续流：先尝试「同 SR / 同模式下图仍在」的轻量恢复，避免仅因 `!isPlaying` 走整段 teardown。
+        // 连续流：先尝试「同 SR / 同模式下图仍在」的轻量恢复，避免仅因引擎被 pause 走整段 teardown。
         if usesContinuousCloudDownlinkCallAudio,
            audioRouter.tryResumeContinuousOpusPlaybackIfPossible(sampleRate: sr, playbackOnly: playbackOnly) {
             print("[CloudAudioProof] sim_continuous_downlink_resume_inline reason=\(reason) sr=\(sr) playbackOnly=\(playbackOnly)")
             return
         }
-        print("[CloudAudioProof] sim_continuous_downlink_prepare reason=\(reason) sr=\(sr) ws_downstream_sr=\(ws.downstreamSampleRate) current_tts_sr=\(currentTTSSampleRate) scene=\(scene.rawValue)")
+        let isPlayingFlag = audioRouter.isPlaying()
+        print("[CloudAudioProof] sim_continuous_downlink_prepare reason=\(reason) sr=\(sr) ws_downstream_sr=\(ws.downstreamSampleRate) current_tts_sr=\(currentTTSSampleRate) scene=\(scene.rawValue) isPlayingFlag=\(isPlayingFlag) healthy=false")
         audioRouter.prepareForTTSStart(
             monitorTTSOnPhone: monitorTTSOnPhone,
             inputSource: inputSource,
@@ -339,7 +345,7 @@ extension CallSessionController: WebSocketServiceDelegate {
             sampleRate: sr,
             isSpeaker: isSpeaker
         )
-        if !audioRouter.isPlaying() {
+        if !audioRouter.isPlaybackPipelineHealthy() {
             print("[CloudAudioProof] sim_continuous_downlink_prepare_STILL_IDLE search=prepareForTTSStart_preparePlayback_FAILED")
         }
     }

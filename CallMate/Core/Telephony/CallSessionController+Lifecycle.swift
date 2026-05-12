@@ -675,7 +675,13 @@ extension CallSessionController {
         if inputSource == .microphone {
             // 模拟通话场景启用回声消除，配置场景不启用
             let enableEchoCancellation = (scene == .call)
-            try? audio.startRecording(enableEchoCancellation: enableEchoCancellation)
+            // 模拟通话（mic + scene=.call）禁止 BT/HFP 抢路由：用户希望走手机扬声器，
+            // 否则附近已配对的 MCU/AirPods 会把下行抢走 → 听不到 TTS。
+            let allowBluetoothHFP = !(scene == .call)
+            try? audio.startRecording(
+                enableEchoCancellation: enableEchoCancellation,
+                allowBluetoothHFP: allowBluetoothHFP
+            )
         }
     }
 

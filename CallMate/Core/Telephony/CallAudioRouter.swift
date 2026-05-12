@@ -312,8 +312,25 @@ final class CallAudioRouter {
         audio.isPlaying
     }
 
+    /// 反映播放管线的"实际"健康状态（引擎在 running、player 仍 attached）。
+    /// 用于「连续下行」路径判断是否需要重建管线 —— `isPlaying()` 仅是 @Published 标志，
+    /// 路由变化或被中断时可能与真实状态不一致。
+    func isPlaybackPipelineHealthy() -> Bool {
+        audio.isPlaybackPipelineHealthy
+    }
+
     func tryResumeContinuousOpusPlaybackIfPossible(sampleRate: Int, playbackOnly: Bool) -> Bool {
         audio.tryResumeContinuousOpusPlaybackIfPossible(sampleRate: sampleRate, playbackOnly: playbackOnly)
+    }
+
+    /// 模拟通话（mic + scene=.call）：用户不希望被附近的 BT/HFP 设备（包括已配对的 MCU）
+    /// 抢走输出，要求始终走手机扬声器。BLE 通话则相反 —— MCU 自己就是 HFP 端点。
+    private func shouldAllowBluetoothHFP(
+        inputSource: CallSessionController.InputSource,
+        scene: WebSocketScene
+    ) -> Bool {
+        if inputSource == .microphone && scene == .call { return false }
+        return true
     }
 
     func reassertSpeakerOnFirstTTSAudioFrameIfNeeded(
@@ -344,16 +361,24 @@ final class CallAudioRouter {
         isSpeaker: Bool
     ) {
         if monitorTTSOnPhone {
+            let allowHFP = shouldAllowBluetoothHFP(inputSource: inputSource, scene: scene)
             if inputSource == .microphone && !scene.isManualInteractionScene && !audio.isRecording {
-                try? audio.startRecording(enableEchoCancellation: true)
+                try? audio.startRecording(
+                    enableEchoCancellation: true,
+                    allowBluetoothHFP: allowHFP
+                )
             }
             // AI 分身/配置场景：TTS 始终用纯播放（.playback）走扬声器 + 媒体音量，避免听筒；
             // 主动打电话场景：始终走通话音频路径（.playAndRecord），确保对方能听到声音。
             let ttsPlaybackOnly = scene.isManualInteractionScene
-            print("[CallAudioRouter] inputSource=\(inputSource) monitorOnPhone=\(monitorTTSOnPhone)")
+            print("[CallAudioRouter] inputSource=\(inputSource) monitorOnPhone=\(monitorTTSOnPhone) allowHFP=\(allowHFP)")
 
             do {
-                try audio.preparePlayback(sampleRate: sampleRate, playbackOnly: ttsPlaybackOnly)
+                try audio.preparePlayback(
+                    sampleRate: sampleRate,
+                    playbackOnly: ttsPlaybackOnly,
+                    allowBluetoothHFP: allowHFP
+                )
             } catch {
                 print("[CloudAudioProof] prepareForTTSStart_preparePlayback_FAILED sampleRate=\(sampleRate) playbackOnly=\(ttsPlaybackOnly) scene=\(scene.rawValue) err=\(error.localizedDescription)")
             }

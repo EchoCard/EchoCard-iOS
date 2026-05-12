@@ -263,18 +263,35 @@ class AudioService: NSObject, ObservableObject {
     // MARK: - 录音
     
     /// 开始录音
-    /// - Parameter enableEchoCancellation: 是否启用回声消除（Voice Processing I/O）
-    ///   - true: 模拟通话场景，需要回声消除
-    ///   - false: AI 配置/私人秘书场景，不需要回声消除
-    func startRecording(enableEchoCancellation: Bool = true) throws {
+    /// - Parameters:
+    ///   - enableEchoCancellation: 是否启用回声消除（Voice Processing I/O）
+    ///     - true: 模拟通话场景，需要回声消除
+    ///     - false: AI 配置/私人秘书场景，不需要回声消除
+    ///   - allowBluetoothHFP: 是否允许把音频路由到 BT/HFP 设备
+    ///     - true: BLE 通话（MCU 自身就走 HFP，必须开）
+    ///     - false: 模拟通话（用户希望从手机扬声器听 TTS，不要被附近 HFP 抢走）
+    func startRecording(
+        enableEchoCancellation: Bool = true,
+        allowBluetoothHFP: Bool = true
+    ) throws {
         guard !isRecording else { return }
-        
+
         // 配置音频会话（如已匹配则避免重复 setCategory）
+        var sessionOptions: AVAudioSession.CategoryOptions = [.defaultToSpeaker]
+        if allowBluetoothHFP {
+            sessionOptions.insert(.allowBluetoothHFP)
+        }
         try configureAudioSession(
             category: .playAndRecord,
             mode: .videoChat,
-            options: [.defaultToSpeaker, .allowBluetoothHFP]
+            options: sessionOptions
         )
+        if !allowBluetoothHFP {
+            // `.defaultToSpeaker` 仅决定无显式输出时的默认路由；如果当前路由已被
+            // 系统挂在听筒/HFP 上（比如 BLE 背景 session 之前 acquire 过），需要
+            // 显式 override 一下才能强制走外放。
+            try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+        }
         
         // Recording uses a dedicated engine.
         let engine: AVAudioEngine
@@ -421,10 +438,25 @@ class AudioService: NSObject, ObservableObject {
     
     // MARK: - 播放
 
+    /// 播放管线"实际"是否健康：`isPlaying` 是 @Published 标志，路由变化或被中断时
+    /// `AVAudioEngine` 可能被悄悄停掉而本地标志未同步。任何依赖"是否在播"的判定
+    /// 都应走这里，避免因为 `isPlaying==true` 但引擎已停而吞帧。
+    var isPlaybackPipelineHealthy: Bool {
+        guard isPlaying else { return false }
+        guard playbackFormat != nil else { return false }
+        guard let engine = playbackEngine, engine.isRunning else { return false }
+        guard let node = playbackNode, node.engine === engine else { return false }
+        return true
+    }
+
     /// 连续模拟通话：`isPlaying` 可能与「图仍在、仅引擎暂停或未置位」短暂不一致；若与当前下行参数一致则只恢复运行，避免 `preparePlayback` 开头的 `stopPlayback` 拆掉 BGM。
     func tryResumeContinuousOpusPlaybackIfPossible(sampleRate: Int, playbackOnly: Bool) -> Bool {
-        if isPlaying, playbackFormat != nil, playbackNode != nil { return true }
-        guard playbackFormat != nil, let eng = playbackEngine, playbackNode != nil else { return false }
+        // 已健康直接复用
+        if isPlaybackPipelineHealthy,
+           playSampleRate == sampleRate,
+           isPlaybackOnlyMode == playbackOnly { return true }
+        // 图还在但引擎挂了：参数一致就 cold-start 引擎；参数不一致由调用方走 prepare 重建
+        guard playbackFormat != nil, let eng = playbackEngine, let node = playbackNode, node.engine === eng else { return false }
         guard playSampleRate == sampleRate, isPlaybackOnlyMode == playbackOnly else { return false }
         if !eng.isRunning {
             do {
@@ -439,13 +471,19 @@ class AudioService: NSObject, ObservableObject {
     }
     
     /// 准备播放（收到 TTS start 时调用）
-    /// 准备播放（收到 TTS start 时调用）
     /// - Parameters:
     ///   - sampleRate: 服务端下行采样率
     ///   - playbackOnly: 为 true 时使用 .playback 类别（音量更大，走扬声器），
     ///     适用于 updateConfig/initConfig 等不需要同时录音的场景。
     ///     为 false 时使用 .playAndRecord + .voiceChat（支持全双工 + 回声消除）。
-    func preparePlayback(sampleRate: Int, playbackOnly: Bool = false) throws {
+    ///   - allowBluetoothHFP: 全双工模式下是否允许 BT/HFP 抢占输出路由
+    ///     - true: BLE 通话（MCU 自身就走 HFP，必须开）
+    ///     - false: 模拟通话（强制走手机扬声器，避免被附近 HFP 设备抢走 → 听不到）
+    func preparePlayback(
+        sampleRate: Int,
+        playbackOnly: Bool = false,
+        allowBluetoothHFP: Bool = true
+    ) throws {
         let startedAt = Date()
         // Some servers can emit duplicate `tts start` events within one utterance.
         // If playback pipeline is already configured the same way, keep current
@@ -487,11 +525,20 @@ class AudioService: NSObject, ObservableObject {
                 try configureAudioSession(category: .playback, mode: .default, options: [])
             } else {
                 // 全双工模式：支持同时录音 + 播放，带回声消除
+                var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker]
+                if allowBluetoothHFP {
+                    options.insert(.allowBluetoothHFP)
+                }
                 try configureAudioSession(
                     category: .playAndRecord,
                     mode: .videoChat,
-                    options: [.defaultToSpeaker, .allowBluetoothHFP]
+                    options: options
                 )
+                if !allowBluetoothHFP {
+                    // 见 startRecording 同名调用：强制把当前路由也压到扬声器，
+                    // 否则系统可能仍把输出挂在听筒/已配对 HFP 上。
+                    try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+                }
             }
         } catch {
             print("[CloudAudioProof] preparePlayback_FAILED_configure_session sr=\(sampleRate) playbackOnly=\(playbackOnly) err=\(error.localizedDescription)")
