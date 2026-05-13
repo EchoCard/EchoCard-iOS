@@ -16,6 +16,7 @@ nonisolated final class TTSUplinkState: @unchecked Sendable {
         var enqueuedBytes: Int = 0
         var sentFrames: Int = 0
         var sentBytes: Int = 0
+        var droppedFrames: Int = 0
     }
 
     struct EnqueueOutcome {
@@ -29,12 +30,23 @@ nonisolated final class TTSUplinkState: @unchecked Sendable {
         let droppedReason: String?
     }
 
+    struct FlowSnapshot {
+        let queueCount: Int
+        let enqueuedFrames: Int
+        let sentFrames: Int
+        let droppedFrames: Int
+        let fps: Double
+        let elapsed: Double
+    }
+
     private let lock = NSLock()
     private var queue: [Data] = []
     private var counters = Counters()
     private var enqueueLastAt: Date = .distantPast
     private var enqueueTotalFrames: Int = 0
     private var lastLogAt: Date = .distantPast
+    private var flowWindowStartAt: Date = .distantPast
+    private var flowSentFramesInWindow: Int = 0
 
     init() {}
 
@@ -71,6 +83,7 @@ nonisolated final class TTSUplinkState: @unchecked Sendable {
                 let drop = queue.count - cap
                 if drop > 0 {
                     queue.removeFirst(drop)
+                    counters.droppedFrames += drop
                     droppedCount = drop
                     droppedReason = "pre-ack cap(opus)"
                 }
@@ -79,6 +92,7 @@ nonisolated final class TTSUplinkState: @unchecked Sendable {
             let drop = queue.count - maxItems
             if drop > 0 {
                 queue.removeFirst(drop)
+                counters.droppedFrames += drop
                 droppedCount = drop
                 droppedReason = "queue cap(opus)"
             }
@@ -111,6 +125,31 @@ nonisolated final class TTSUplinkState: @unchecked Sendable {
         lock.unlock()
     }
 
+    func recordSentAndMaybeFlowLog(bytes: Int, now: Date = Date()) -> FlowSnapshot? {
+        lock.lock(); defer { lock.unlock() }
+        counters.sentFrames += 1
+        counters.sentBytes += bytes
+        if flowWindowStartAt == .distantPast {
+            flowWindowStartAt = now
+            flowSentFramesInWindow = 0
+        }
+        flowSentFramesInWindow += 1
+        let elapsed = now.timeIntervalSince(flowWindowStartAt)
+        guard elapsed >= 2.0 else { return nil }
+        let fps = elapsed > 0 ? Double(flowSentFramesInWindow) / elapsed : 0
+        let snapshot = FlowSnapshot(
+            queueCount: queue.count,
+            enqueuedFrames: counters.enqueuedFrames,
+            sentFrames: counters.sentFrames,
+            droppedFrames: counters.droppedFrames,
+            fps: fps,
+            elapsed: elapsed
+        )
+        flowWindowStartAt = now
+        flowSentFramesInWindow = 0
+        return snapshot
+    }
+
     func appendAll(_ items: [Data]) {
         lock.lock(); queue.append(contentsOf: items); lock.unlock()
     }
@@ -123,6 +162,8 @@ nonisolated final class TTSUplinkState: @unchecked Sendable {
         lock.lock()
         counters = Counters()
         lastLogAt = .distantPast
+        flowWindowStartAt = .distantPast
+        flowSentFramesInWindow = 0
         lock.unlock()
     }
 
@@ -133,6 +174,8 @@ nonisolated final class TTSUplinkState: @unchecked Sendable {
         enqueueLastAt = .distantPast
         enqueueTotalFrames = 0
         lastLogAt = .distantPast
+        flowWindowStartAt = .distantPast
+        flowSentFramesInWindow = 0
         lock.unlock()
     }
 
@@ -173,6 +216,8 @@ final class CallAudioRouter {
     private var audioStartRetryTask: Task<Void, Never>?
     private var audioFlowWatchdogTask: Task<Void, Never>?
     private var ttsUplinkDrainTask: Task<Void, Never>?
+    private var ttsUplinkDrainTimer: DispatchSourceTimer?
+    private let ttsUplinkDrainQueue = DispatchQueue(label: "callmate.tts-uplink-drain", qos: .userInitiated)
     private var wsDisconnectDrainPlaybackTask: Task<Void, Never>?
     private var ttsStopPlaybackTask: Task<Void, Never>?
     /// Queue + counters shared between the nonisolated WS fast-enqueue path and the @MainActor
@@ -182,6 +227,9 @@ final class CallAudioRouter {
     // ---- TTS delivery diagnostics (drain-side, touched only on @MainActor) ----
     private var ttsDrainSentFrames: Int = 0             // frames sent in current 2s window
     private var ttsDrainWindowStart: Date = .distantPast
+    private let ttsUplinkFrameDurationNs: UInt64 = 58_000_000
+    private let ttsUplinkCatchupFrameDurationNs: UInt64 = 45_000_000
+    private let ttsUplinkCatchupQueueThreshold: Int = 8
     private var emergencyBGMProbeFramesRemaining: Int = 0
     private var emergencyBGMProbeFramesTotal: Int = 0
     private var emergencyBGMProbeFrameDurationMs: Double = 0
@@ -211,6 +259,8 @@ final class CallAudioRouter {
     func cancelTTSUplinkDrain() {
         ttsUplinkDrainTask?.cancel()
         ttsUplinkDrainTask = nil
+        ttsUplinkDrainTimer?.cancel()
+        ttsUplinkDrainTimer = nil
     }
 
     func cancelWSDisconnectDrainPlaybackTask() {
@@ -552,9 +602,10 @@ final class CallAudioRouter {
 
     func scheduleTTSUplinkDrainIfNeeded(
         canStart: @escaping @MainActor () -> Bool,
-        drainOnce: @escaping @MainActor (_ reason: String) -> Int,
         shouldRetryNoProgressSoon: @escaping @MainActor () -> Bool,
         onCompleted: @escaping @MainActor (_ rounds: Int) -> Void,
+        onFirstSend: @escaping @MainActor () -> Void,
+        sendOpus: @escaping (Data) -> Void,
         reason: String
     ) {
         if !canStart() {
@@ -569,33 +620,76 @@ final class CallAudioRouter {
             }
             return
         }
-        guard ttsUplinkDrainTask == nil else { return }
+        guard ttsUplinkDrainTask == nil, ttsUplinkDrainTimer == nil else { return }
         print("[NOSOUND] drain_start: reason=\(reason) q=\(uplinkState.count)")
-        ttsUplinkDrainTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            var rounds = 0
-            var totalSent = 0
-            var noProgressRetries = 0
-            let maxNoProgressRetries = 100 // 100 × 20ms = 2s max wait for BLE to unblock
-            while !Task.isCancelled {
-                rounds += 1
-                let sent = drainOnce(reason)
-                totalSent += sent
-                if sent <= 0 {
-                    if shouldRetryNoProgressSoon(), noProgressRetries < maxNoProgressRetries {
-                        noProgressRetries += 1
-                        try? await Task.sleep(nanoseconds: 20_000_000) // 20ms
-                        continue
-                    }
-                    break
+        let state = uplinkState
+        let frameDelayNs = ttsUplinkFrameDurationNs
+        let catchupDelayNs = ttsUplinkCatchupFrameDurationNs
+        let catchupThreshold = ttsUplinkCatchupQueueThreshold
+        let source = DispatchSource.makeTimerSource(queue: ttsUplinkDrainQueue)
+        ttsUplinkDrainTimer = source
+        var didCallFirstSend = false
+        var didComplete = false
+        var rounds = 0
+        var totalSent = 0
+        source.setEventHandler { [weak self] in
+            func finish() {
+                guard !didComplete else { return }
+                didComplete = true
+                source.cancel()
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    print("[NOSOUND] drain_done: reason=\(reason) rounds=\(rounds) totalSent=\(totalSent) qLeft=\(state.count)")
+                    onCompleted(rounds)
+                    self.ttsUplinkDrainTimer = nil
                 }
-                noProgressRetries = 0
-                await Task.yield()
             }
-            print("[NOSOUND] drain_done: reason=\(reason) rounds=\(rounds) totalSent=\(totalSent) qLeft=\(self.uplinkState.count)")
-            onCompleted(rounds)
-            self.ttsUplinkDrainTask = nil
+
+            guard let payload = state.tryRemoveFirst() else {
+                if state.isEmpty {
+                    finish()
+                } else {
+                    Task { @MainActor in
+                        if shouldRetryNoProgressSoon() {
+                            source.schedule(deadline: .now() + .milliseconds(20), leeway: .milliseconds(5))
+                        } else {
+                            finish()
+                        }
+                    }
+                }
+                return
+            }
+
+            rounds += 1
+            totalSent += 1
+            if !didCallFirstSend {
+                didCallFirstSend = true
+                Task { @MainActor in onFirstSend() }
+            }
+            sendOpus(payload)
+            if let flow = state.recordSentAndMaybeFlowLog(bytes: payload.count) {
+                let qNow = state.count
+                let delayMs = qNow >= catchupThreshold
+                    ? (catchupDelayNs / 1_000_000)
+                    : (frameDelayNs / 1_000_000)
+                let mode = qNow >= catchupThreshold ? "catchup" : "paced"
+                print(String(format: "[TTS-DIAG] ble_send_rate: sent_fps=%.1f needed_fps=16.7 window=%.1fs total_sent=%d q=%d",
+                             flow.fps, flow.elapsed, flow.sentFrames, qNow))
+                print(String(format: "[FLOW][iOS][TTS] mode=%@ q=%d delay_ms=%llu enq=%d sent=%d drop=%d sent_fps=%.1f",
+                             mode,
+                             qNow,
+                             delayMs,
+                             flow.enqueuedFrames,
+                             flow.sentFrames,
+                             flow.droppedFrames,
+                             flow.fps))
+            }
+            let qNow = state.count
+            let delayNs = qNow >= catchupThreshold ? catchupDelayNs : frameDelayNs
+            source.schedule(deadline: .now() + .nanoseconds(Int(delayNs)), leeway: .milliseconds(5))
         }
+        source.schedule(deadline: .now(), leeway: .milliseconds(2))
+        source.resume()
     }
 
     @discardableResult
@@ -612,8 +706,10 @@ final class CallAudioRouter {
         }
         let speedThisRound = (Date() < ttsBoostUntil) ? ttsUplinkSpeedX : 1
         // Opus: each dequeue returns 1 frame × 60ms = 60ms/payload.
-        // burst=2 → 2 × 60ms = 120ms, enough to give MCU one-frame lead-in while staying smooth.
-        let burstBudget = max(1, speedThisRound) * 2
+        // Send one frame per drain tick.  Burst throughput is handled by the
+        // pacing sleep in `scheduleTTSUplinkDrainIfNeeded`; keeping this at 1
+        // prevents one actor turn from overfeeding CoreBluetooth/MCU.
+        let burstBudget = 1
 
         var sent = 0
         var probeFramesSentThisRound = 0
@@ -677,6 +773,19 @@ final class CallAudioRouter {
                 let snap = uplinkState.snapshotCounters()
                 print(String(format: "[TTS-DIAG] ble_send_rate: sent_fps=%.1f needed_fps=16.7 window=%.1fs total_sent=%d q=%d",
                              fps, elapsed, snap.sentFrames, uplinkState.count))
+                let qNow = uplinkState.count
+                let delayMs = qNow >= ttsUplinkCatchupQueueThreshold
+                    ? (ttsUplinkCatchupFrameDurationNs / 1_000_000)
+                    : (ttsUplinkFrameDurationNs / 1_000_000)
+                let mode = qNow >= ttsUplinkCatchupQueueThreshold ? "catchup" : "paced"
+                print(String(format: "[FLOW][iOS][TTS] mode=%@ q=%d delay_ms=%llu enq=%d sent=%d drop=%d sent_fps=%.1f",
+                             mode,
+                             qNow,
+                             delayMs,
+                             snap.enqueuedFrames,
+                             snap.sentFrames,
+                             snap.droppedFrames,
+                             fps))
                 ttsDrainWindowStart = Date()
                 ttsDrainSentFrames = 0
             }

@@ -246,6 +246,7 @@ extension CallSessionController {
             bleWSConnectContext = .incomingCall
             if wsAlreadyConnected {
                 transportCoordinator.markWSHelloReceived()
+                hasReceivedWSHelloInCurrentCall = true
             } else {
                 transportCoordinator.markWSConnectStarted()
             }

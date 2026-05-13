@@ -171,6 +171,8 @@ extension CallSessionController {
         bleWSDisconnectReactionTask = nil
         aiHangupReactionTask?.cancel()
         aiHangupReactionTask = nil
+        bleFarewellHangupTask?.cancel()
+        bleFarewellHangupTask = nil
         if Self.activeControllerId == controllerId {
             Self.activeControllerId = nil
         }
@@ -490,6 +492,7 @@ extension CallSessionController {
                 // WS was already established from incoming_call stage.
                 syncWSSessionIdFromService(reason: "activatePendingCall_ifAlreadyConnected")
                 transportCoordinator.markWSHelloReceived()
+                hasReceivedWSHelloInCurrentCall = true
                 pendingActiveConnect = false
                 startConnectedFlow()
             } else {
@@ -828,8 +831,15 @@ extension CallSessionController {
         let current = ble.runtimeSnapshot.deviceHFPState ?? "unknown"
         print("[CallSession] HFP not ready for answer (state=\(current)), send hfp_connect and wait")
         ble.sendCommand("hfp_connect", expectAck: false)
-        try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s
-        let after = ble.runtimeSnapshot.deviceHFPState ?? "unknown"
+        let deadline = Date().addingTimeInterval(1.2)
+        var after = current
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            after = ble.runtimeSnapshot.deviceHFPState ?? "unknown"
+            if hfpLooksReadyForAnswer() {
+                break
+            }
+        }
         print("[CallSession] HFP state after pre-answer connect wait: \(after)")
     }
 }

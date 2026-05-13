@@ -180,6 +180,8 @@ final class CallSessionController: NSObject, ObservableObject {
     var manualReconnectInFlight: Bool = false
     var bleWSDisconnectReactionTask: Task<Void, Never>?
     var aiHangupReactionTask: Task<Void, Never>?
+    var bleFarewellHangupTask: Task<Void, Never>?
+    var lastTTSSentenceText: String = ""
     /// For the very first TTS in a call, prefer preserving the head of the audio queue
     /// (greeting) over latency-bounding drops. This avoids "first sentence missing".
     var isFirstTTSInCall: Bool = true {
@@ -207,6 +209,11 @@ final class CallSessionController: NSObject, ObservableObject {
         let raw = UserDefaults.standard.double(forKey: "callmate.disconnect_reaction_delay_sec")
         let v = raw == 0 ? 1.0 : raw
         return max(0.0, min(30.0, v))
+    }
+    var midCallReconnectWindowSec: Double {
+        let raw = UserDefaults.standard.double(forKey: "callmate.mid_call_reconnect_window_sec")
+        let v = raw == 0 ? 3.0 : raw
+        return max(0.0, min(10.0, v))
     }
     /// Off by default so realtime audio logging does not distort debug-session performance.
     /// Enable manually with UserDefaults key `callmate.verbose_realtime_audio_logging`.
@@ -311,13 +318,13 @@ final class CallSessionController: NSObject, ObservableObject {
     // TTS throttling for BLE uplink (send at real-time rate, not burst)
     let ttsUplinkPendingSoftCap: Int = 64
     /// Cap uplink queue to keep latency bounded (drop oldest).
-    /// 10 frames × 60ms = 600ms — aligned with Android `MAX_PENDING_TTS_FRAMES`;
-    /// absorbs modest WebSocket jitter while the BLE drain
-    /// pipeline pushes audio to the MCU at real-time (or 2x during boost).
+    /// 20 frames × 60ms = 1.2s. 17 Air / iOS 26 can deliver WebSocket Opus
+    /// in short bursts after route changes; the drain loop paces/catches up,
+    /// so keep enough queue to avoid dropping audible TTS frames.
     ///
     /// `nonisolated let` so the WS fast-enqueue hook can pass it as the `maxQueueItems`
     /// argument from the nonisolated receive queue.
-    nonisolated let ttsUplinkMaxQueueItemsOpus: Int = 10
+    nonisolated let ttsUplinkMaxQueueItemsOpus: Int = 20
     /// BLE uplink speed multiplier for cloud TTS audio.
     /// Default 2 = send 2 frames per 60ms tick (2x throughput).
     /// Can be overridden via UserDefaults key `ble_tts_uplink_speed_x`.

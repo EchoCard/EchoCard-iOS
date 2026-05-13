@@ -4,7 +4,11 @@ import Foundation
 
 extension CallSessionController: WebSocketServiceDelegate {
     func webSocketDidConnect(sessionId: String) {
-        guard isActiveController else { return }
+        hasReceivedWSHelloInCurrentCall = true
+        guard isActiveController else {
+            print("[CloudAudioProof] delegate_ws_hello_ack_pre_active sessionId_prefix=\(String(sessionId.prefix(12)))… status=\(status) scene=\(scene) note=sticky_hello_marked_for_future_reconnect")
+            return
+        }
         continuousBleDownlinkSessionPrepared = false
         if usesContinuousCloudDownlinkCallAudio {
             ttsAudioRxCount = 0
@@ -12,7 +16,6 @@ extension CallSessionController: WebSocketServiceDelegate {
             ttsBinaryRxBatchStartAt = nil
             ttsBinaryRxBatchStartPendingFrames = 0
         }
-        hasReceivedWSHelloInCurrentCall = true
         print("[CloudAudioProof] delegate_ws_hello_ack sessionId_prefix=\(String(sessionId.prefix(12)))… bleCallActive=\(bleCallActive) bleAudAck=\(bleAudioStartAcked) pendingActiveConnect=\(pendingActiveConnect) status=\(status) scene=\(scene) wsListenAlready=\(wsListeningStarted)")
         print("[NOSOUND] ws_connected: sessionId=\(sessionId) bleCallActive=\(bleCallActive) acked=\(bleAudioStartAcked) wsListening=\(wsListeningStarted)")
         print("[WS_RECONNECT_TRACE] hello_seen sticky=true source=webSocketDidConnect")
@@ -116,17 +119,67 @@ extension CallSessionController: WebSocketServiceDelegate {
             bleWSDisconnectReactionTask?.cancel()
             bleWSDisconnectReactionTask = Task { [weak self] in
                 guard let self, !Task.isCancelled else { return }
-                let delaySec = self.disconnectReactionDelaySec
-                if delaySec > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(delaySec * 1_000_000_000))
-                }
-                guard !Task.isCancelled else { return }
                 defer { self.bleWSDisconnectReactionTask = nil }
-                guard self.isActiveController else { return }
-                guard !self.ws.isConnected else {
-                    print(String(format: "[CallSession] WS recovered within %.2fs; skip delayed disconnect handling", delaySec))
+
+                if disconnectInfo?.kind == .normalEnd {
+                    print("[CallSession] WS normal_end in BLE call: finish AI call instead of reconnecting")
+                    self.processWebSocketDisconnect(error: error, disconnectInfo: disconnectInfo)
                     return
                 }
+
+                let inActiveAIContext = self.bleCallActive ||
+                    self.bleWSConnectContext == .activeCall ||
+                    self.status == .connected
+                let canMidCallReconnect = inActiveAIContext &&
+                    self.hasReceivedWSHelloInCurrentCall &&
+                    self.midCallReconnectWindowSec > 0
+
+                if canMidCallReconnect {
+                    let windowSec = self.midCallReconnectWindowSec
+                    print(String(format: "[CallSession] WS mid-call disconnect: try reconnect window=%.2fs", windowSec))
+                    self.transportCoordinator.markWSConnectStarted()
+                    self.applyPhoneIDContextForWS()
+                    self.ws.setCallHelloPromptOverride(self.activeOutboundPrompt)
+                    let taskForApns = self.activeOutboundTaskID ?? self.pendingOutboundTaskID
+                    self.ws.setHelloApnsRequestId(OutboundTaskQueueService.shared.apnsRequestId(forTask: taskForApns))
+                    let retryScene: WebSocketScene =
+                        (self.outboundCallId != nil || self.currentIncomingCall?.title == "[OUTBOUND_TASK]")
+                        ? .callOutbound : .call
+                    if retryScene == .callOutbound {
+                        self.ws.setOutboundHelloContext(OutboundHelloContext(
+                            targetPhone: self.outboundTargetPhone ?? "",
+                            callerName: self.outboundCallerName ?? "",
+                            taskGoal: self.outboundTaskGoal ?? ""
+                        ))
+                    }
+                    self.ws.connect(audioFormat: self.bleWSAudioFormat,
+                                    scene: retryScene,
+                                    reason: "mid_call_ws_disconnect_reconnect")
+
+                    let deadline = Date().addingTimeInterval(windowSec)
+                    while Date() < deadline {
+                        if Task.isCancelled { return }
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                        if self.ws.isConnected {
+                            print("[CallSession] WS mid-call reconnected, skip hangup")
+                            return
+                        }
+                    }
+                    if Task.isCancelled { return }
+                    print(String(format: "[CallSession] WS mid-call reconnect window %.2fs elapsed without recovery, fall through to hangup decision", windowSec))
+                } else {
+                    let delaySec = self.disconnectReactionDelaySec
+                    if delaySec > 0 {
+                        try? await Task.sleep(nanoseconds: UInt64(delaySec * 1_000_000_000))
+                    }
+                    guard !Task.isCancelled else { return }
+                    if self.ws.isConnected {
+                        print(String(format: "[CallSession] WS recovered within %.2fs; skip delayed disconnect handling", delaySec))
+                        return
+                    }
+                }
+
+                guard self.isActiveController else { return }
                 self.processWebSocketDisconnect(error: error, disconnectInfo: disconnectInfo)
             }
             return
@@ -547,6 +600,7 @@ extension CallSessionController: WebSocketServiceDelegate {
                 return
             }
             // 追加到缓冲区，由 TTSCharacterStreamBuffer 逐字输出
+            lastTTSSentenceText = cleaned
             ttsStreamBuffer.append(cleaned)
             print("[CallSession] TTS sentence start -> buffer append: \(cleaned)")
         } else {
@@ -620,9 +674,50 @@ extension CallSessionController: WebSocketServiceDelegate {
         }
         audioRouter.stopRecordingForConfigIfNeeded(scene: scene, wsListeningStarted: wsListeningStarted)
         audioRouter.setTTSStopped(!usesContinuousCloudDownlinkCallAudio)
+        scheduleBLEFarewellHangupAfterTTSStopIfNeeded()
         if inputSource == .ble && !usesContinuousCloudDownlinkCallAudio {
             isFirstTTSInCall = false
         }
+    }
+
+    func scheduleBLEFarewellHangupAfterTTSStopIfNeeded() {
+        guard inputSource == .ble else { return }
+        guard !shouldSuppressBLEHangup else { return }
+        guard bleCallActive || status == .connected || bleWSConnectContext == .activeCall else { return }
+        let sentence = lastTTSSentenceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isFarewellTTSSentence(sentence) else { return }
+
+        bleFarewellHangupTask?.cancel()
+        bleFarewellHangupTask = Task { [weak self] in
+            guard let self else { return }
+            let raw = UserDefaults.standard.double(forKey: "callmate.ble_farewell_hangup_grace_sec")
+            let delaySec = raw == 0 ? 1.2 : max(0.2, min(5.0, raw))
+            try? await Task.sleep(nanoseconds: UInt64(delaySec * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            defer { self.bleFarewellHangupTask = nil }
+            guard self.isActiveController else { return }
+            guard self.inputSource == .ble else { return }
+            guard self.status != .ended else { return }
+            guard self.bleCallActive || self.status == .connected || self.bleWSConnectContext == .activeCall else { return }
+            print(String(format: "[CallSession] BLE farewell TTS stop: auto hangup after %.2fs sentence=\"%@\"", delaySec, sentence))
+            self.suppressBLEAutoReconnectBeforeIntentionalMCUHangup(reason: "ble_farewell_tts_stop")
+            self.sendCallCommand("audio_stop", expectAck: false)
+            self.sendCallCommand("hangup", expectAck: false)
+            self.end()
+        }
+    }
+
+    func isFarewellTTSSentence(_ text: String) -> Bool {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        guard !normalized.isEmpty else { return false }
+        return normalized.contains("再见") ||
+            normalized.contains("拜拜") ||
+            normalized.contains("挂了") ||
+            normalized.contains("bye") ||
+            normalized.contains("goodbye")
     }
 
     func webSocketDidReceiveFiller(id: String) {
@@ -983,10 +1078,6 @@ extension CallSessionController: WebSocketServiceDelegate {
                 guard self.bleAudioStartAcked else { return false }
                 return self.audioRouter.hasUplinkData()
             },
-            drainOnce: { [weak self] reason in
-                guard let self else { return 0 }
-                return self.drainTTSUplinkOnce(reason: reason)
-            },
             shouldRetryNoProgressSoon: { [weak self] in
                 guard let self else { return false }
                 guard self.audioRouter.hasUplinkData() else { return false }
@@ -1002,6 +1093,19 @@ extension CallSessionController: WebSocketServiceDelegate {
                 if rounds > 0 && self.audioRouter.isTTSStopped() && !self.audioRouter.hasUplinkData() {
                   //  print("[TTS->BLE] drain task completed after TTS stop rounds=\(rounds)")
                 }
+            },
+            onFirstSend: { [weak self] in
+                guard let self else { return }
+                if self.tBleFirstUpSendNs == nil {
+                    self.latFirstBleUplinkAt = Date()
+                    self.latencyLog("ble_first_tts_uplink_send_to_mcu")
+                    self.traceMark("BLE_uplink_first_send(to_mcu)", store: &self.tBleFirstUpSendNs)
+                    self.traceLogDelta("WS_down->BLE_up_first_send", self.tWsFirstDownRxNs, self.tBleFirstUpSendNs)
+                    self.traceLogDelta("enqueue->BLE_up_first_send", self.tTtsFirstEnqueueNs, self.tBleFirstUpSendNs)
+                }
+            },
+            sendOpus: { [weak self] payload in
+                self?.ble.sendUplinkOpus(payload)
             },
             reason: reason
         )
