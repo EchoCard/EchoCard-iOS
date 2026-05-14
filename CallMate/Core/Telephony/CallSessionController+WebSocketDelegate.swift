@@ -1104,6 +1104,10 @@ extension CallSessionController: WebSocketServiceDelegate {
                     self.traceLogDelta("enqueue->BLE_up_first_send", self.tTtsFirstEnqueueNs, self.tBleFirstUpSendNs)
                 }
             },
+            currentBLEPendingWriteCount: { [weak self] in
+                self?.ble.pendingAudioWriteCount ?? 0
+            },
+            pendingSoftCap: ttsUplinkPendingSoftCap,
             sendOpus: { [weak self] payload in
                 self?.ble.sendUplinkOpus(payload)
             },

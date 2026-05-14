@@ -39,13 +39,11 @@ extension CallSessionController {
         audio.acquireBLEBackgroundSession()
         if bleBackgroundTaskId == .invalid {
             bleBackgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "CallMate.BLECall") { [weak self] in
-                guard let self else { return }
-                print("[CallSession] background task expired")
-                if self.bleBackgroundTaskId != .invalid {
-                    UIApplication.shared.endBackgroundTask(self.bleBackgroundTaskId)
-                    self.bleBackgroundTaskId = .invalid
+                Task { @MainActor [weak self] in
+                    self?.endBLEBackgroundTask(reason: "expired")
                 }
             }
+            scheduleBLEBackgroundTaskAutoEnd(taskId: bleBackgroundTaskId)
         }
         print("[CallSession] BLE background support started reason=\(reason)")
     }
@@ -55,10 +53,34 @@ extension CallSessionController {
         guard bleBackgroundSupportActive || bleBackgroundTaskId != .invalid else { return }
         bleBackgroundSupportActive = false
         audio.releaseBLEBackgroundSession()
-        if bleBackgroundTaskId != .invalid {
-            UIApplication.shared.endBackgroundTask(bleBackgroundTaskId)
-            bleBackgroundTaskId = .invalid
-        }
+        endBLEBackgroundTask(reason: reason)
         print("[CallSession] BLE background support stopped reason=\(reason)")
+    }
+
+    private func scheduleBLEBackgroundTaskAutoEnd(taskId: UIBackgroundTaskIdentifier) {
+        bleBackgroundTaskAutoEndWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.bleBackgroundTaskId == taskId else { return }
+                self.endBLEBackgroundTask(reason: "grace_timeout")
+            }
+        }
+        bleBackgroundTaskAutoEndWorkItem = workItem
+
+        /* The audio session is the long-lived background aid.  The UIKit
+         * background task is only a short grace window around Phone UI / route
+         * transitions; holding it for the full call triggers iOS's 30s warning.
+         */
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25.0, execute: workItem)
+    }
+
+    private func endBLEBackgroundTask(reason: String) {
+        bleBackgroundTaskAutoEndWorkItem?.cancel()
+        bleBackgroundTaskAutoEndWorkItem = nil
+        guard bleBackgroundTaskId != .invalid else { return }
+        let taskId = bleBackgroundTaskId
+        bleBackgroundTaskId = .invalid
+        UIApplication.shared.endBackgroundTask(taskId)
+        print("[CallSession] BLE background task ended reason=\(reason)")
     }
 }

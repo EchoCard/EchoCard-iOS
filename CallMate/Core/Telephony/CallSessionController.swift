@@ -313,10 +313,13 @@ final class CallSessionController: NSObject, ObservableObject {
     var lastCloudSTTRxAt: Date?
     var pendingCloudSTTForTTS: Bool = false
     var bleBackgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+    var bleBackgroundTaskAutoEndWorkItem: DispatchWorkItem?
     var bleBackgroundSupportActive: Bool = false
     
     // TTS throttling for BLE uplink (send at real-time rate, not burst)
-    let ttsUplinkPendingSoftCap: Int = 64
+    /// Keep CoreBluetooth's audio write backlog short. Larger values can keep
+    /// sent_fps looking healthy while the peripheral hears seconds-old TTS.
+    let ttsUplinkPendingSoftCap: Int = 16
     /// Cap uplink queue to keep latency bounded (drop oldest).
     /// 20 frames × 60ms = 1.2s. 17 Air / iOS 26 can deliver WebSocket Opus
     /// in short bursts after route changes; the drain loop paces/catches up,
