@@ -17,7 +17,6 @@ final class AppServices {
     let ble: CallMateBLEClient
     let webSocket: WebSocketService
     let audio: AudioService
-    let controlChannel: ControlChannelService
     let backendAuth: BackendAuthManager
     let permissions: PermissionsCenter
     let liveActivityManager: CallLiveActivityManager
@@ -28,7 +27,6 @@ final class AppServices {
         ble: CallMateBLEClient? = nil,
         webSocket: WebSocketService? = nil,
         audio: AudioService? = nil,
-        controlChannel: ControlChannelService? = nil,
         backendAuth: BackendAuthManager? = nil,
         permissions: PermissionsCenter? = nil,
         liveActivityManager: CallLiveActivityManager? = nil,
@@ -38,7 +36,6 @@ final class AppServices {
         let resolvedBLE = ble ?? CallMateBLEClient.shared
         let resolvedWebSocket = webSocket ?? .shared
         let resolvedAudio = audio ?? .shared
-        let resolvedControlChannel = controlChannel ?? .shared
         let resolvedBackendAuth = backendAuth ?? .shared
         let resolvedPermissions = permissions ?? .shared
         let resolvedLiveActivityManager = liveActivityManager ?? .shared
@@ -47,7 +44,6 @@ final class AppServices {
         self.ble = resolvedBLE
         self.webSocket = resolvedWebSocket
         self.audio = resolvedAudio
-        self.controlChannel = resolvedControlChannel
         self.backendAuth = resolvedBackendAuth
         self.permissions = resolvedPermissions
         self.liveActivityManager = resolvedLiveActivityManager

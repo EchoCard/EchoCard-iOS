@@ -2,7 +2,7 @@
 //  OutboundTaskQueueService.swift
 //  CallMate
 //
-//  外呼任务队列服务：增删改查 + 执行，供 UI 与 ControlChannelService 共用。
+//  外呼任务队列服务：增删改查 + 执行，供 UI 与 DesktopLink 等共用。
 //
 
 import Foundation
@@ -56,15 +56,6 @@ final class OutboundTaskQueueService: ObservableObject {
     private let outboundSummaryPrefix = "[OUTBOUND_TASK]"
     private let unansweredTimeoutSeconds = 20
 
-    /// APNs 推送顶层的 `request_id`（见 ios-integration.md）：用于 WS `hello.initiate.apns_request_id`。
-    private var apnsRequestIdByTaskId: [UUID: String] = [:]
-
-    /// 当前外呼任务若由 APNs 下发，返回对应 `request_id`，供 `hello` 使用。
-    func apnsRequestId(forTask taskId: UUID?) -> String? {
-        guard let taskId else { return nil }
-        return apnsRequestIdByTaskId[taskId]
-    }
-
     private init() {}
 
     private var language: Language {
@@ -84,15 +75,13 @@ final class OutboundTaskQueueService: ObservableObject {
     // MARK: - 增
 
     /// 创建任务；若 scheduled_at 为 nil 则立即执行。返回 task_id。
-    /// - Parameter apnsRequestId: 若来自 APNs `command`（如 `task.create`），填入推送中的 `request_id`，用于 WS hello。
     func createTask(
         promptType: String,
         prompt: String,
         contacts: [OutboundContact],
         scheduledAt: Date?,
         callFrequency: Int = 30,
-        redialMissed: Bool = false,
-        apnsRequestId: String? = nil
+        redialMissed: Bool = false
     ) -> UUID? {
         guard !contacts.isEmpty else { return nil }
         let task = OutboundTask(
@@ -108,10 +97,6 @@ final class OutboundTaskQueueService: ObservableObject {
         var list = OutboundTaskStore.load()
         list.append(task)
         OutboundTaskStore.save(list)
-
-        if let rid = apnsRequestId?.trimmingCharacters(in: .whitespacesAndNewlines), !rid.isEmpty {
-            apnsRequestIdByTaskId[task.id] = rid
-        }
 
         if scheduledAt == nil {
             executeTask(taskID: task.id)
@@ -200,13 +185,11 @@ final class OutboundTaskQueueService: ObservableObject {
         runningRunner?.cancel()
         runningRunner = nil
         runningTaskIds.removeAll()
-        apnsRequestIdByTaskId.removeAll()
         outboundDialBlockedMessage = nil
     }
 
     /// 立即执行指定任务（仅当当前无任务在执行时）
-    /// - Parameter apnsRequestId: APNs `task.run` 推送中的 `request_id`（覆盖同任务上一次的值，供本轮通话 hello 使用）。
-    func executeTask(taskID: UUID, apnsRequestId: String? = nil) {
+    func executeTask(taskID: UUID) {
         guard runningRunner == nil, !runningTaskIds.contains(taskID) else { return }
         var list = OutboundTaskStore.load()
         guard let idx = list.firstIndex(where: { $0.id == taskID }) else { return }
@@ -228,10 +211,6 @@ final class OutboundTaskQueueService: ObservableObject {
             }
         }
         outboundDialBlockedMessage = nil
-
-        if let rid = apnsRequestId?.trimmingCharacters(in: .whitespacesAndNewlines), !rid.isEmpty {
-            apnsRequestIdByTaskId[taskID] = rid
-        }
 
         list[idx].status = .running
         list[idx].dialSuccessCount = 0
@@ -266,13 +245,11 @@ final class OutboundTaskQueueService: ObservableObject {
 
     // MARK: - 单呼（落库）
 
-    /// 单呼并落库：创建一条单联系人任务并立即执行，返回 (success, message, task_id)。供 WS / APNs `dial` 使用；成功后可用 task.report(task_id) 查询。
-    /// - Parameter apnsRequestId: 若来自远端 `dial` 且带 `request_id`，写入任务映射供 WS `hello.initiate.apns_request_id` 使用。
-    /// - Parameter promptType: 远端控制通道拨号使用 `"apns"`，本地/WS 默认 `"ws"`。
+    /// 单呼并落库：创建一条单联系人任务并立即执行，返回 (success, message, task_id)。供 WS 等使用；成功后可用 task.report(task_id) 查询。
+    /// - Parameter promptType: 来源通道标识（如 `"ws"`）。
     func dialOncePersisted(
         phone: String,
         prompt: String,
-        apnsRequestId: String? = nil,
         promptType: String = "ws"
     ) -> (success: Bool, message: String, taskId: UUID?) {
         if let risk = OutboundDialRiskControl.evaluate(phone: phone, at: Date()) {
@@ -283,8 +260,7 @@ final class OutboundTaskQueueService: ObservableObject {
             promptType: promptType,
             prompt: prompt,
             contacts: [contact],
-            scheduledAt: nil,
-            apnsRequestId: apnsRequestId
+            scheduledAt: nil
         ) else {
             return (false, "create failed", nil)
         }
@@ -423,8 +399,6 @@ final class OutboundTaskQueueService: ObservableObject {
         else if success == 0 { list[idx].status = .failed }
         else { list[idx].status = .partial }
         OutboundTaskStore.save(list)
-
-        apnsRequestIdByTaskId.removeValue(forKey: taskID)
     }
 
     private func insertBlockedCallLog(ctx: ModelContext, taskID: UUID, taskSnapshot: OutboundTask, contact: OutboundContact, message: String) {

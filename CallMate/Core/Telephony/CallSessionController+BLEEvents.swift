@@ -360,8 +360,6 @@ extension CallSessionController {
                         print("[WS_RECONNECT_TRACE] \(wsConnectReason): force disconnect stale ws before reconnect")
                         ws.disconnect()
                     }
-                    let taskForApns = activeOutboundTaskID ?? pendingOutboundTaskID
-                    ws.setHelloApnsRequestId(OutboundTaskQueueService.shared.apnsRequestId(forTask: taskForApns))
                     ws.setCallHelloPromptOverride(activeOutboundPrompt)
                     ws.setOutboundHelloContext(OutboundHelloContext(
                         targetPhone: outboundTargetPhone ?? "",

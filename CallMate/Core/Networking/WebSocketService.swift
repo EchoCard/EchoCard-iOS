@@ -300,8 +300,6 @@ class WebSocketService: NSObject, ObservableObject {
     /// 外呼场景 hello.initiate.template_vars 元数据。
     /// 与 `callHelloPromptOverride` 同时设定，仅 `.callOutbound` 场景使用。
     @MainActor private var outboundHelloContext: OutboundHelloContext?
-    /// APNs `command` 的 `request_id`（仅外呼且由静默推送触发时）；填入 `hello.initiate.apns_request_id`。
-    @MainActor private var helloApnsRequestId: String?
     // Per-session init messages injected for config/onboarding flows only.
     // Stored here rather than in UserDefaults so they can never leak into unrelated WS sessions.
     @MainActor private var pendingInitMessages: [[String: String]]?
@@ -422,13 +420,11 @@ class WebSocketService: NSObject, ObservableObject {
             if helloScene == scene && self.audioFormat == audioFormat {
                 if (scene == .call || scene == .callOutbound) && callHelloPromptOverride != nil {
                     let savedOverride = callHelloPromptOverride
-                    let savedApns = helloApnsRequestId
                     let savedOutboundCtx = outboundHelloContext
                     let sceneLabel = scene == .call ? "call" : "call_outbound"
                     print("[PromptTrace] connect() FORCE-RECONNECT: same scene=\(sceneLabel) but callHelloPromptOverride was set (\(callHelloPromptOverride!.count)chars), need fresh hello")
                     disconnect()
                     callHelloPromptOverride = savedOverride
-                    helloApnsRequestId = savedApns
                     outboundHelloContext = savedOutboundCtx
                 } else {
                     let sceneLabel = scene == .call ? "call" : (scene == .callOutbound ? "call_outbound" : scene.rawValue)
@@ -446,16 +442,13 @@ class WebSocketService: NSObject, ObservableObject {
                 print("[WS] connect audioFormat switch \(self.audioFormat) -> \(audioFormat), reconnect")
             }
             let savedOverride = callHelloPromptOverride
-            let savedApns = helloApnsRequestId
             let savedOutboundCtx = outboundHelloContext
             disconnect()
             if scene == .call {
                 callHelloPromptOverride = savedOverride
-                helloApnsRequestId = savedApns
             } else if scene == .callOutbound {
                 // 外呼场景切换：保留 prompt override + outbound 元数据。
                 callHelloPromptOverride = savedOverride
-                helloApnsRequestId = savedApns
                 outboundHelloContext = savedOutboundCtx
             }
         }
@@ -513,7 +506,7 @@ class WebSocketService: NSObject, ObservableObject {
 
             let token = await BackendAuthManager.shared.ensureToken()
             if let token {
-                print("[WS][AUTH] Bearer token prefix=\(String(token.prefix(12)))... len=\(token.count) (used in WS Authorization header)")
+                print("[WS][AUTH] Bearer jwt len=\(token.count) (full: filter console by \(CallMateCredentialConsole.prefix))")
             } else {
                 print("[WS][AUTH] token=nil — cannot set Authorization; handshake will fail or be rejected")
             }
@@ -716,14 +709,6 @@ class WebSocketService: NSObject, ObservableObject {
         outboundHelloContext = ctx
         print("[WS] setOutboundHelloContext phone=\(ctx?.targetPhone ?? "nil") caller=\(ctx?.callerName ?? "nil") goal=\(ctx?.taskGoal ?? "nil")")
     }
-
-    /// 下一通 `scene=call` 的 hello 是否在 `initiate` 中带 `apns_request_id`（非 APNs 外呼传 nil）。
-    @MainActor
-    func setHelloApnsRequestId(_ requestId: String?) {
-        let trimmed = requestId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        helloApnsRequestId = trimmed.isEmpty ? nil : trimmed
-        print("[WS] setHelloApnsRequestId=\(helloApnsRequestId ?? "nil")")
-    }
     
     /// 断开连接
     @MainActor
@@ -744,7 +729,6 @@ class WebSocketService: NSObject, ObservableObject {
         helloRetryTask = nil
         helloAcked = false
         callHelloPromptOverride = nil
-        helloApnsRequestId = nil
         outboundHelloContext = nil
         pendingInitMessages = nil
         pendingIncomingCallContext = nil
@@ -788,16 +772,10 @@ class WebSocketService: NSObject, ObservableObject {
             if let prompt = callHelloPromptOverride?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
                 initiate["prompt"] = prompt
             }
-            if let rid = helloApnsRequestId?.trimmingCharacters(in: .whitespacesAndNewlines), !rid.isEmpty {
-                initiate["apns_request_id"] = rid
-            }
         } else if helloScene == .callOutbound {
             // call_outbound scene (plan/2026-04-30-call-outbound-client-delta.md §3):
             // prompt goes to template_vars.business_prompt (not initiate.prompt).
             // ✿END✿ instruction is NOT appended — server template handles it.
-            if let rid = helloApnsRequestId?.trimmingCharacters(in: .whitespacesAndNewlines), !rid.isEmpty {
-                initiate["apns_request_id"] = rid
-            }
         } else if helloScene == .updateConfig {
             // v1 (update_config client spec, 2026-04-28): prompt is fully owned
             // by the server. Client only injects template_vars below — no
@@ -1367,7 +1345,6 @@ class WebSocketService: NSObject, ObservableObject {
         cloudProofSceneSnapshot = helloScene.rawValue
         if helloScene == .call {
             callHelloPromptOverride = nil
-            helloApnsRequestId = nil
         }
         if !helloScene.isManualInteractionScene {
             pendingInitMessages = nil

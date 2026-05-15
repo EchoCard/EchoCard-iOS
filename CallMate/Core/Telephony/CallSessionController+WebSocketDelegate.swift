@@ -140,8 +140,6 @@ extension CallSessionController: WebSocketServiceDelegate {
                     self.transportCoordinator.markWSConnectStarted()
                     self.applyPhoneIDContextForWS()
                     self.ws.setCallHelloPromptOverride(self.activeOutboundPrompt)
-                    let taskForApns = self.activeOutboundTaskID ?? self.pendingOutboundTaskID
-                    self.ws.setHelloApnsRequestId(OutboundTaskQueueService.shared.apnsRequestId(forTask: taskForApns))
                     let retryScene: WebSocketScene =
                         (self.outboundCallId != nil || self.currentIncomingCall?.title == "[OUTBOUND_TASK]")
                         ? .callOutbound : .call
@@ -321,8 +319,6 @@ extension CallSessionController: WebSocketServiceDelegate {
             self.transportCoordinator.markWSConnectStarted()
             self.applyPhoneIDContextForWS()
             self.ws.setCallHelloPromptOverride(self.activeOutboundPrompt)
-            let taskForApns = self.activeOutboundTaskID ?? self.pendingOutboundTaskID
-            self.ws.setHelloApnsRequestId(OutboundTaskQueueService.shared.apnsRequestId(forTask: taskForApns))
             let retryScene: WebSocketScene =
                 (self.outboundCallId != nil || self.currentIncomingCall?.title == "[OUTBOUND_TASK]")
                 ? .callOutbound : .call

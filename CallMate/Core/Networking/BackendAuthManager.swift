@@ -21,7 +21,7 @@ final class BackendAuthManager: ObservableObject {
     // MARK: - Config
 
     private let apiBaseURL = URL(string: AppConfig.apiBaseURL)!
-    /// 控制面（APNs `command` / dial、`POST /api/callback` 等）。若与 `apiBaseURL` 不同域，在此单独配置 `AppConfig.controlApiBaseURL`。
+    /// 控制面（`POST /api/callback` 等）。若与 `apiBaseURL` 不同域，在此单独配置 `AppConfig.controlApiBaseURL`。
     private let controlApiBaseURL = URL(string: AppConfig.controlApiBaseURL)!
 
     private let hardcodedPidId = AppConfig.hardcodedPidId
@@ -65,13 +65,8 @@ final class BackendAuthManager: ObservableObject {
         self.appCode = app
         self.token = cachedToken
 
-        print("[Auth] init pid_id=\(pid) (hardcoded)")
-        print("[Auth] init app_code=\(app) len=\(app.count) (hardcoded)")
-        if let cachedToken {
-            print("[Auth] init cached token prefix=\(String(cachedToken.prefix(12)))...")
-        } else {
-            print("[Auth] init cached token=nil")
-        }
+        print("[Auth] init pid_id=\(pid) (hardcoded) app_code.len=\(app.count) (hardcoded) — see \(CallMateCredentialConsole.prefix) for full snapshot")
+        CallMateCredentialConsole.logWhileSingletonIsInitializing(reason: "auth_manager_init", auth: self)
     }
 
     // MARK: - Public helpers
@@ -82,6 +77,7 @@ final class BackendAuthManager: ObservableObject {
         appCode = normalized
         UserDefaults.standard.set(normalized, forKey: appCodeKey)
         print("[Auth] setAppCode app_code(32)=\(normalized) len=\(normalized.count)")
+        CallMateCredentialConsole.log(reason: "app_code_changed")
     }
 
     /// Optional: override `pid_id` at runtime and persist it.
@@ -91,6 +87,7 @@ final class BackendAuthManager: ObservableObject {
         pidId = trimmed
         UserDefaults.standard.set(trimmed, forKey: pidIdKey)
         print("[Auth] setPidId pid_id=\(trimmed)")
+        CallMateCredentialConsole.log(reason: "pid_id_changed")
     }
 
     /// Seconds before `exp` to proactively refresh. If server TTL is shorter than this (e.g. 1‑minute
@@ -119,6 +116,7 @@ final class BackendAuthManager: ObservableObject {
         token = nil
         UserDefaults.standard.removeObject(forKey: jwtTokenKey)
         print("[Auth] invalidated cached JWT")
+        CallMateCredentialConsole.log(reason: "jwt_invalidated")
     }
 
     /// Run register (first install) + get_token. Safe to call multiple times.
@@ -159,36 +157,13 @@ final class BackendAuthManager: ObservableObject {
                     UserDefaults.standard.set(token, forKey: jwtTokenKey)
                 }
                 manager.bootstrappingTask = nil
+                CallMateCredentialConsole.log(reason: "bootstrap_http_complete")
             }
             return result.token
         }
 
         bootstrappingTask = task
         return await task.value
-    }
-
-    /// `POST /api/app/register` with `os_type` + `apns_token` (updates existing pid_id+app_code).
-    /// Call after APNs token is known and when activating the push control channel.
-    @discardableResult
-    func syncPushRegistration(apnsTokenHex: String? = nil) async -> Bool {
-        let token = (apnsTokenHex ?? UserDefaults.standard.string(forKey: "callmate.apns_device_token"))?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let clipped = token.flatMap { $0.count > 64 ? String($0.prefix(64)) : $0 }
-        print("[Auth] syncPushRegistration raw apns.len=\(token?.count ?? 0)")
-        do {
-            try await BackendAuthHTTPClient.register(
-                apiBaseURL: apiBaseURL,
-                pidId: pidId,
-                appCode: appCode,
-                osType: 1,
-                apnsToken: clipped
-            )
-            print("[Auth] syncPushRegistration OK apns.len=\(clipped?.count ?? 0)")
-            return true
-        } catch {
-            print("[Auth] syncPushRegistration FAILED: \(error)")
-            return false
-        }
     }
 
     /// 控制面结果回传：`request_id` 由控制面签发，须 POST 至该域 `/api/callback`（勿误发到仅业务 API 域）。
@@ -288,11 +263,9 @@ final class BackendAuthManager: ObservableObject {
         let app_code: String
         /// 1 = iOS, 2 = Android (see `/api/app/register`)
         var os_type: Int?
-        /// APNs device token hex; values longer than 64 chars are clipped before send.
-        var apns_token: String?
 
         enum CodingKeys: String, CodingKey {
-            case pid_id, app_code, os_type, apns_token
+            case pid_id, app_code, os_type
         }
 
         func encode(to encoder: Encoder) throws {
@@ -300,7 +273,6 @@ final class BackendAuthManager: ObservableObject {
             try c.encode(pid_id, forKey: .pid_id)
             try c.encode(app_code, forKey: .app_code)
             try c.encodeIfPresent(os_type, forKey: .os_type)
-            try c.encodeIfPresent(apns_token, forKey: .apns_token)
         }
     }
 
@@ -417,18 +389,13 @@ private enum BackendAuthHTTPClient {
 
         print("[Auth] bootstrap start hasRegistered=\(snapshot.hasRegistered)")
 
-        let apnsFromDefaults = UserDefaults.standard.string(forKey: "callmate.apns_device_token")?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let apnsClipped = apnsFromDefaults.flatMap { $0.count > 64 ? String($0.prefix(64)) : $0 }
-
         if !snapshot.hasRegistered {
             do {
                 let registerResponse = try await register(
                     apiBaseURL: apiBaseURL,
                     pidId: snapshot.pidId,
                     appCode: resolvedAppCode,
-                    osType: 1,
-                    apnsToken: apnsClipped
+                    osType: 1
                 )
                 didRegister = true
                 if let serverAppCode = registerResponse.data.app_code,
@@ -486,15 +453,13 @@ private enum BackendAuthHTTPClient {
         apiBaseURL: URL,
         pidId: String,
         appCode: String,
-        osType: Int?,
-        apnsToken: String?
+        osType: Int?
     ) async throws -> BackendAuthManager.RegisterResponse {
         let url = apiBaseURL.appendingPathComponent("/api/app/register")
         var body = BackendAuthManager.RegisterRequest(pid_id: pidId, app_code: appCode)
         body.os_type = osType
-        body.apns_token = apnsToken
 
-        print("[Auth] POST \(url.absoluteString) pid_id.len=\(pidId.count) app_code.len=\(appCode.count) os_type=\(osType.map(String.init) ?? "nil") apns.len=\(apnsToken?.count ?? 0)")
+        print("[Auth] POST \(url.absoluteString) pid_id.len=\(pidId.count) app_code.len=\(appCode.count) os_type=\(osType.map(String.init) ?? "nil")")
         let response: BackendAuthManager.RegisterResponse = try await postJSON(
             url: url,
             body: body,

@@ -99,7 +99,6 @@ extension CallSessionController {
         pendingOutboundPrompt = nil
         activeOutboundPrompt = nil
         ws.setCallHelloPromptOverride(nil)
-        ws.setHelloApnsRequestId(nil)
 
         if permissions.networkStatus == .satisfied {
             transportCoordinator.markWSConnectStarted()
@@ -483,7 +482,6 @@ extension CallSessionController {
         pendingOutboundPrompt = nil
         activeOutboundPrompt = nil
         ws.setCallHelloPromptOverride(nil)
-        ws.setHelloApnsRequestId(nil)
         status = CallStateMachine.reduce(status, event: .startRequested)
         syncLiveActivity()
         if permissions.networkStatus == .satisfied {

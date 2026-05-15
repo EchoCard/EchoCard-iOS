@@ -112,9 +112,6 @@ struct ContentView: View {
                 print("[ContentView] onAppear")
                 guard hasAcceptedLegalDocs else { return }
                 bootstrapAfterLegalConsent(reason: "content_on_appear")
-                if appState == .main {
-                    appServices.controlChannel.activate()
-                }
             }
             .onChange(of: hasAcceptedLegalDocs) { _, newValue in
                 guard newValue else { return }
@@ -135,7 +132,6 @@ struct ContentView: View {
                 case .landing:
                     pendingFillerPreloadAfterScanSession = false
                 case .main:
-                    appServices.controlChannel.activate()
                     liveCallPresentation.syncForActiveScene(appState: newValue)
                     if pendingFillerPreloadAfterScanSession {
                         pendingFillerPreloadAfterScanSession = false
@@ -150,13 +146,8 @@ struct ContentView: View {
     // Stage 2: BLE state observers
     private var containerWithBLEObservers: some View {
         containerWithSheets
-            .onChange(of: contentBLEState.snapshot.runtimeMCUDeviceID) { _, mcuDeviceId in
-                // 控制通道上报 MCU device-id + APNs 注册；BLE 断开时停用。
-                if mcuDeviceId == nil || mcuDeviceId?.isEmpty == true {
-                    appServices.controlChannel.deactivate()
-                } else if appState == .main {
-                    appServices.controlChannel.activate()
-                }
+            .onChange(of: contentBLEState.snapshot.runtimeMCUDeviceID) { _, _ in
+                CallMateCredentialConsole.log(reason: "mcu_runtime_device_id_changed")
             }
             .onChange(of: contentBLEState.snapshot.deviceANCSEnabled) { _, enabled in
                 guard AppFeatureFlags.ancsAuthorizationEnabled else { return }
@@ -448,10 +439,8 @@ struct ContentView: View {
         // Flow: register (first install) -> get_token -> persist JWT.
         Task {
             let token = await appServices.backendAuth.bootstrap()
-            if let token {
-                print("[App] Auth bootstrap OK token prefix=\(String(token.prefix(12)))...")
-            } else {
-                print("[App] Auth bootstrap FAILED token=nil")
+            if token == nil {
+                print("[App] Auth bootstrap FAILED token=nil — see \(CallMateCredentialConsole.prefix)")
             }
         }
         liveCallPresentation.syncForActiveScene(appState: appState)
