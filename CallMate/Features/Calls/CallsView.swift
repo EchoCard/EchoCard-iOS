@@ -464,8 +464,12 @@ struct CallsView: View {
         .accessibilityIdentifier("calls-root")
         .onAppear {
             onHomeVisibilityChange?(isOnHomePage)
+            syncActiveModeToMCU(reason: "calls_on_appear")
             checkMcuUpdateIfNeeded(force: false)
             openPendingCallDetailIfNeeded()
+        }
+        .onChange(of: activeMode) { _, _ in
+            syncActiveModeToMCU(reason: "mode_changed")
         }
         .onChange(of: isShowingSubView) { _, showing in
             onHomeVisibilityChange?(!showing && !showDeviceModal)
@@ -478,6 +482,7 @@ struct CallsView: View {
         }
         .onChange(of: ble.isCtrlReady) { _, ready in
             if ready {
+                syncActiveModeToMCU(reason: "ctrl_ready")
                 if pendingMcuCheckWhenCtrlReady {
                     logMcuPopup("ctrl ready: run deferred check")
                     pendingMcuCheckWhenCtrlReady = false
@@ -1048,6 +1053,19 @@ struct CallsView: View {
         }
         .frame(width: segmentSide, height: segmentSide)
         .buttonStyle(.plain)
+    }
+
+    private func syncActiveModeToMCU(reason: String) {
+        guard bleSnapshot.isCtrlReady else {
+            print("[CallsView] skip active_mode sync reason=\(reason): ctrl not ready mode=\(activeMode.rawValue)")
+            return
+        }
+        guard bleSnapshot.connectedPeripheralID != nil else {
+            print("[CallsView] skip active_mode sync reason=\(reason): no peripheral mode=\(activeMode.rawValue)")
+            return
+        }
+        print("[CallsView] active_mode sync reason=\(reason) mode=\(activeMode.rawValue)")
+        ble.sendActiveMode(activeMode.rawValue, expectAck: false)
     }
     
     @ViewBuilder
