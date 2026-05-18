@@ -29,6 +29,9 @@ final class CallLiveActivityManager {
     private var residentEmergencySummary: ResidentEmergencySummary?
     private var summaryDismissTask: Task<Void, Never>?
     private var lastEndedState: CallMateLiveActivityAttributes.ContentState?
+    private var lastCallingUpdateAt: Date = .distantPast
+    private var lastCallingUpdateState: CallMateLiveActivityAttributes.ContentState?
+    private let minCallingUpdateInterval: TimeInterval = 1.0
 
     private init() {
         didBecomeActiveObserver = NotificationCenter.default.addObserver(
@@ -126,9 +129,14 @@ final class CallLiveActivityManager {
         )
 
         if let activity {
+            if shouldThrottleCallingUpdate(state) {
+                return
+            }
             Task {
                 await activity.update(ActivityContent(state: state, staleDate: nil))
             }
+            lastCallingUpdateAt = Date()
+            lastCallingUpdateState = state
             currentCallId = callId
             return
         }
@@ -143,6 +151,20 @@ final class CallLiveActivityManager {
             print("[LiveActivity] background start from push callId=\(callId)")
         }
         startNewActivity(callId: callId, state: state)
+    }
+
+    private func shouldThrottleCallingUpdate(_ state: CallMateLiveActivityAttributes.ContentState) -> Bool {
+        guard state.phase == .calling else { return false }
+        let now = Date()
+        guard now.timeIntervalSince(lastCallingUpdateAt) < minCallingUpdateInterval else {
+            return false
+        }
+        guard let last = lastCallingUpdateState else { return false }
+        return last.statusText == state.statusText &&
+            last.callerName == state.callerName &&
+            last.callerNumber == state.callerNumber &&
+            last.canHandoff == state.canHandoff &&
+            last.canHangup == state.canHangup
     }
 
     // MARK: - Post-call: show ended state (waiting for summary)
@@ -172,6 +194,8 @@ final class CallLiveActivityManager {
             phase: .ended
         )
         lastEndedState = state
+        lastCallingUpdateState = nil
+        lastCallingUpdateAt = .distantPast
 
         Task {
             await activity.update(ActivityContent(state: state, staleDate: nil))
@@ -194,6 +218,8 @@ final class CallLiveActivityManager {
         }
 
         summaryDismissTask?.cancel()
+        lastCallingUpdateState = nil
+        lastCallingUpdateAt = .distantPast
 
         let base = lastEndedState
         let state = CallMateLiveActivityAttributes.ContentState(
@@ -224,6 +250,8 @@ final class CallLiveActivityManager {
         summaryDismissTask?.cancel()
         summaryDismissTask = nil
         lastEndedState = nil
+        lastCallingUpdateState = nil
+        lastCallingUpdateAt = .distantPast
         // Always discard any deferred start so it never resurfaces after the call ends.
         self.pendingStartRequest = nil
 
@@ -260,6 +288,10 @@ final class CallLiveActivityManager {
                 pushType: nil
             )
             currentCallId = callId
+            if state.phase == .calling {
+                lastCallingUpdateAt = Date()
+                lastCallingUpdateState = state
+            }
             print("[LiveActivity] started id=\(activity?.id ?? "nil") callId=\(callId)")
         } catch {
             print("[LiveActivity] start failed: \(error.localizedDescription)")

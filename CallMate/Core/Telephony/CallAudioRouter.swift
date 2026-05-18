@@ -647,6 +647,19 @@ final class CallAudioRouter {
                 }
             }
 
+            let blePending = currentBLEPendingWriteCount()
+            if blePending >= pendingSoftCap {
+                if state.isEmpty {
+                    finish()
+                } else {
+                    // CoreBluetooth is already backed up. Keep the drain alive,
+                    // but do not move more TTS frames into the BLE client's
+                    // pending queue until the write window catches up.
+                    source.schedule(deadline: .now() + .milliseconds(20), leeway: .milliseconds(5))
+                }
+                return
+            }
+
             guard let payload = state.tryRemoveFirst() else {
                 if state.isEmpty {
                     finish()
@@ -658,19 +671,6 @@ final class CallAudioRouter {
                             finish()
                         }
                     }
-                }
-                return
-            }
-
-            let blePending = currentBLEPendingWriteCount()
-            if blePending >= pendingSoftCap {
-                if state.isEmpty {
-                    finish()
-                } else {
-                    // CoreBluetooth is already backed up. Keep the drain alive,
-                    // but do not move more TTS frames into the BLE client's
-                    // pending queue until the write window catches up.
-                    source.schedule(deadline: .now() + .milliseconds(20), leeway: .milliseconds(5))
                 }
                 return
             }

@@ -48,6 +48,7 @@ struct CallsView: View {
     @State private var internshipReportDismissed: Bool = false
     @State private var toastMessage: String?
     @State private var takeoverSegmentControlHeight: CGFloat = 100
+    @State private var appHeartbeatTask: Task<Void, Never>?
     private let activeModeKey = "callmate_active_mode"
     private let limitMcuCheckOncePerDay = false
     private let debugIgnoreMcuPromptedVersionLimit = true
@@ -465,6 +466,7 @@ struct CallsView: View {
         .onAppear {
             onHomeVisibilityChange?(isOnHomePage)
             syncActiveModeToMCU(reason: "calls_on_appear")
+            startAppHeartbeat()
             checkMcuUpdateIfNeeded(force: false)
             openPendingCallDetailIfNeeded()
         }
@@ -483,6 +485,7 @@ struct CallsView: View {
         .onChange(of: ble.isCtrlReady) { _, ready in
             if ready {
                 syncActiveModeToMCU(reason: "ctrl_ready")
+                startAppHeartbeat()
                 if pendingMcuCheckWhenCtrlReady {
                     logMcuPopup("ctrl ready: run deferred check")
                     pendingMcuCheckWhenCtrlReady = false
@@ -531,6 +534,7 @@ struct CallsView: View {
         }
         .onReceive(ble.$isReady.removeDuplicates()) { _ in
             completeEchoCardConnectIfReady()
+            startAppHeartbeat()
         }
         .onReceive(ble.$connectedPeripheralID.removeDuplicates(by: ==)) { _ in
             completeEchoCardConnectIfReady()
@@ -1066,6 +1070,25 @@ struct CallsView: View {
         }
         print("[CallsView] active_mode sync reason=\(reason) mode=\(activeMode.rawValue)")
         ble.sendActiveMode(activeMode.rawValue, expectAck: false)
+    }
+
+    private func startAppHeartbeat() {
+        guard bleSnapshot.isCtrlReady, bleSnapshot.connectedPeripheralID != nil else {
+            return
+        }
+        if appHeartbeatTask != nil {
+            return
+        }
+        appHeartbeatTask = Task { @MainActor in
+            while !Task.isCancelled {
+                guard bleSnapshot.isCtrlReady, bleSnapshot.connectedPeripheralID != nil else {
+                    appHeartbeatTask = nil
+                    return
+                }
+                ble.sendAppHeartbeat()
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+            }
+        }
     }
     
     @ViewBuilder

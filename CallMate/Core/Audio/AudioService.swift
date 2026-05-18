@@ -92,6 +92,9 @@ class AudioService: NSObject, ObservableObject {
     private var recordingEngine: AVAudioEngine?
     private var playbackEngine: AVAudioEngine?
     private var playbackNode: AVAudioPlayerNode?
+    private var bleBackgroundEngine: AVAudioEngine?
+    private var bleBackgroundPlayer: AVAudioPlayerNode?
+    private var bleBackgroundBuffer: AVAudioPCMBuffer?
     private var opusEncoder: OpusEncoderProtocol? {
         didSet { micTapContext.setEncoder(opusEncoder) }
     }
@@ -156,6 +159,7 @@ class AudioService: NSObject, ObservableObject {
                 mode: .voiceChat,
                 options: [.allowBluetoothHFP, .defaultToSpeaker]
             )
+            try startBLEBackgroundAudioKeepAlive()
             print("[Audio] BLE background session acquired")
         } catch {
             // Keep flow best-effort; caller should continue even if session activation fails.
@@ -168,6 +172,7 @@ class AudioService: NSObject, ObservableObject {
         guard bleBackgroundSessionRefCount == 0 else { return }
         // If app is still recording/playing, keep session active for those pipelines.
         guard !isRecording && !isPlaying else { return }
+        stopBLEBackgroundAudioKeepAlive()
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setActive(false, options: [.notifyOthersOnDeactivation])
@@ -175,6 +180,46 @@ class AudioService: NSObject, ObservableObject {
         } catch {
             print("[Audio] BLE background session release failed: \(error.localizedDescription)")
         }
+    }
+
+    private func startBLEBackgroundAudioKeepAlive() throws {
+        if let engine = bleBackgroundEngine, engine.isRunning {
+            return
+        }
+
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160) else {
+            throw AudioError.formatError
+        }
+        buffer.frameLength = buffer.frameCapacity
+        if let channel = buffer.floatChannelData?[0] {
+            memset(channel, 0, Int(buffer.frameLength) * MemoryLayout<Float>.size)
+        }
+
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        engine.prepare()
+        try engine.start()
+        player.volume = 0.0001
+        player.scheduleBuffer(buffer, at: nil, options: [.loops], completionHandler: nil)
+        player.play()
+
+        bleBackgroundEngine = engine
+        bleBackgroundPlayer = player
+        bleBackgroundBuffer = buffer
+        print("[Audio] BLE background keepalive engine started")
+        logCurrentAudioRoute(tag: "ble_background_keepalive_start")
+    }
+
+    private func stopBLEBackgroundAudioKeepAlive() {
+        bleBackgroundPlayer?.stop()
+        bleBackgroundEngine?.stop()
+        bleBackgroundEngine = nil
+        bleBackgroundPlayer = nil
+        bleBackgroundBuffer = nil
+        print("[Audio] BLE background keepalive engine stopped")
     }
     
     // MARK: - 扬声器与音量控制
