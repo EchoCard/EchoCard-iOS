@@ -69,22 +69,16 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A1B2C3D62F4000010057B50D /* CallMateLiveActivity */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = CallMateLiveActivity;
 			sourceTree = "<group>";
 		};
 		B1C2D3E52F5000010057B50D /* CallMateUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = CallMateUITests;
 			sourceTree = "<group>";
 		};
 		FA4E94652F3075970057B50D /* CallMate */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = CallMate;
 			sourceTree = "<group>";
 		};
