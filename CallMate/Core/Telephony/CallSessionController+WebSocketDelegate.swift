@@ -743,6 +743,55 @@ extension CallSessionController: WebSocketServiceDelegate {
             let sortedKeys = Array(arguments.keys).sorted().joined(separator: ",")
             print("\(WebSocketService.outboundAIUCv1Tag) tool_handler_enter side=client scene=\(scene.rawValue) name=\(name) call_id=\(callId) arg_keys=\(sortedKeys)")
         }
+        if name == "load_strategy" || name == "load_rules" {
+            let tag = ((arguments["strategy_id"] ?? arguments["strategy_type"] ?? arguments["tag"]) as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            print("[Tool] \(name) strategy_id=\(tag)")
+            guard !tag.isEmpty else {
+                ws.sendToolResponse(callId: callId, result: nil, error: "缺少 strategy_id")
+                return
+            }
+            if let resp = SkillStore.getStrategyResponse(tag: tag) {
+                ws.sendToolResponse(callId: callId, result: [
+                    "strategy_id": resp.id,
+                    "strategy_name": resp.name,
+                    "rules": resp.rules
+                ])
+            } else {
+                ws.sendToolResponse(callId: callId, result: nil, error: "策略文件不存在: \(tag)")
+            }
+            return
+        }
+        if name == "notify_owner" {
+            let callerIdentity = arguments["caller_identity"] as? String ?? ""
+            let reason = arguments["reason"] as? String ?? ""
+            let urgency = arguments["urgency"] as? String ?? "normal"
+            print("[Tool] notify_owner callerIdentity=\(callerIdentity) reason=\(reason) urgency=\(urgency)")
+            pendingOwnerNotify = OwnerNotifyRequest(
+                id: callId,
+                callerIdentity: callerIdentity,
+                reason: reason,
+                urgency: urgency
+            )
+            ws.sendToolResponse(callId: callId, result: ["success": true])
+            return
+        }
+        if name == "report_call_gap" {
+            let scene = arguments["scene"] as? String ?? ""
+            let question = arguments["question"] as? String ?? ""
+            let handling = arguments["handling"] as? String ?? ""
+            print("[Tool] report_call_gap scene=\(scene) question=\(question)")
+            let gap = CallGapRecord(
+                id: callId,
+                scene: scene,
+                question: question,
+                handling: handling,
+                createdAt: Date()
+            )
+            CallGapStore.append(gap)
+            ws.sendToolResponse(callId: callId, result: ["success": true])
+            return
+        }
         if name == "notify_owner_to_pickup" {
             handleNotifyOwnerToPickup(callId: callId, arguments: arguments)
             return
@@ -759,25 +808,6 @@ extension CallSessionController: WebSocketServiceDelegate {
             UserDefaults.standard.set(raw, forKey: "callmate.userAppellation")
             ws.sendToolResponse(callId: callId, result: ["success": true])
             print("[Tool] save_user_appellation responded success, callId=\(callId)")
-            return
-        }
-        if name == "load_rules" {
-            let tag = (arguments["tag"] as? String)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !tag.isEmpty else {
-                ws.sendToolResponse(callId: callId, result: nil, error: "缺少 tag")
-                return
-            }
-            guard let rule = ProcessStrategyStore.getRule(tag: tag) else {
-                ws.sendToolResponse(callId: callId, result: nil, error: "规则不存在: \(tag)")
-                return
-            }
-            ws.sendToolResponse(callId: callId, result: [
-                "tag": tag,
-                "name": rule.name,
-                "content": rule.content
-            ])
-            print("[Tool] load_rules tag=\(tag) name=\(rule.name) contentLen=\(rule.content.count)")
             return
         }
         if name == "load_template" {
@@ -954,6 +984,27 @@ extension CallSessionController: WebSocketServiceDelegate {
                 scheduledAt: scheduledAt,
                 timeDescription: timeDescription
             )
+            return
+        }
+        if name == "save_rule_file" {
+            let tag = (arguments["tag"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let content = arguments["content"] as? String ?? ""
+            print("[Tool] save_rule_file tag=\(tag)")
+            let ok = SkillStore.saveRuleFile(tag: tag, content: content)
+            ws.sendToolResponse(callId: callId, result: ["success": ok])
+            return
+        }
+        if name == "delete_rule_file" {
+            let tag = (arguments["tag"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            print("[Tool] delete_rule_file tag=\(tag)")
+            SkillStore.deleteRuleFile(tag: tag)
+            ws.sendToolResponse(callId: callId, result: ["success": true])
+            return
+        }
+        if name == "get_all_rules" {
+            print("[Tool] get_all_rules")
+            let content = SkillStore.getAllRulesContent()
+            ws.sendToolResponse(callId: callId, result: ["content": content])
             return
         }
         guard name == "display_rule_change" else {

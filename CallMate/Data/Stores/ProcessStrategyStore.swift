@@ -2,7 +2,8 @@
 //  ProcessStrategyStore.swift
 //  CallMate
 //
-//  Persist and update processStrategy rules on device.
+//  向后兼容适配层 — 内部委托给 SkillStore。
+//  新代码请直接使用 SkillStore。
 //
 
 import Foundation
@@ -20,333 +21,131 @@ struct ProcessStrategyChange {
 }
 
 enum ProcessStrategyStore {
-    private static let key = "ws_process_strategy"
-    static let didChangeNotification = Notification.Name("ProcessStrategyStore.didChange")
-    
+    static var didChangeNotification: Notification.Name {
+        SkillStore.didChangeNotification
+    }
+
     static func processStrategyJSONString() -> String? {
-        ensureDefaultIfNeeded()
-        return UserDefaults.standard.string(forKey: key)
+        SkillStore.skillsJSONString()
     }
-    
+
     static func ensureDefaultIfNeeded() {
-        let defaults = UserDefaults.standard
-        let existing = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let existing, !existing.isEmpty {
-            return
-        }
-        let rules = defaultRules()
-        guard let json = encodeRules(rules) else { return }
-        setStrategyJSONString(json, source: "default_init")
+        SkillStore.ensureDefaultIfNeeded()
     }
 
-    /// 强制将策略重置为内置默认规则，无论当前是否已有保存值。
-    /// 用于"重新配置AI向导"时完全抛弃已有策略。
     static func resetToDefault() {
-        let rules = defaultRules()
-        guard let json = encodeRules(rules) else { return }
-        // Bypass the "unchanged" guard by clearing the key first.
-        UserDefaults.standard.removeObject(forKey: key)
-        setStrategyJSONString(json, source: "reset_to_default")
+        SkillStore.resetToDefault()
     }
-    
+
     static func loadRules() -> [ProcessStrategyRule] {
-        guard let json = UserDefaults.standard.string(forKey: key),
-              let data = json.data(using: .utf8),
-              let rules = try? JSONDecoder().decode([ProcessStrategyRule].self, from: data) else {
-            return defaultRules()
-        }
-        return rules
-    }
-    
-    static func saveRules(_ rules: [ProcessStrategyRule]) {
-        guard let json = encodeRules(rules) else { return }
-        setStrategyJSONString(json, source: "save_rules")
-    }
-    
-    /// 校验并保存策略 JSON 字符串；仅当能解码为 [ProcessStrategyRule] 时保存并返回 true。
-    static func saveProcessStrategyJSONIfValid(_ json: String) -> Bool {
-        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let data = trimmed.data(using: .utf8),
-              let _ = try? JSONDecoder().decode([ProcessStrategyRule].self, from: data) else {
-            return false
-        }
-        setStrategyJSONString(trimmed, source: "save_json")
-        return true
-    }
-    
-    /// 校验策略 JSON 字符串是否可解码为 [ProcessStrategyRule]，不写入。
-    static func validateProcessStrategyJSON(_ json: String) -> Bool {
-        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let data = trimmed.data(using: .utf8),
-              let _ = try? JSONDecoder().decode([ProcessStrategyRule].self, from: data) else {
-            return false
-        }
-        return true
-    }
-    
-    /// v1 update_config: returns the strategy manifest used to populate
-    /// `template_vars.strategyManifest` in the hello payload, and the
-    /// directory the LLM uses to decide whether to call `load_rules`.
-    /// Returns an empty array if the user has no rules; callers should
-    /// **not** include the field in hello when empty (per spec §2).
-    static func getStrategyManifest() -> [[String: String]] {
-        let rules = loadRules()
-        return rules.map { rule in
-            return [
-                "id": manifestId(for: rule),
-                "name": rule.type,
-                "description": manifestDescription(for: rule)
-            ]
+        SkillStore.loadSkills().enumerated().map { idx, skill in
+            ProcessStrategyRule(id: idx + 1, type: skill.name, rule: skill.body)
         }
     }
 
-    /// v1 update_config: looks up the full text of a single rule by the `tag`
-    /// emitted in `strategyManifest[].id`. The current store keys rules by
-    /// `type` (the human name); we use it as both `id` and `name` for now.
-    static func getRule(tag: String) -> (name: String, content: String)? {
-        let target = tag.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !target.isEmpty else { return nil }
-        let rules = loadRules()
-        if let exact = rules.first(where: { manifestId(for: $0) == target }) {
-            return (name: exact.type, content: exact.rule)
+    static func saveRules(_ rules: [ProcessStrategyRule]) {
+        let skills: [SkillRule] = rules.map { rule in
+            SkillRule(
+                tag: tagFromType(rule.type),
+                name: rule.type,
+                description: "",
+                priority: "normal",
+                body: rule.rule
+            )
         }
-        if let byType = rules.first(where: {
-            $0.type.trimmingCharacters(in: .whitespacesAndNewlines) == target
-        }) {
-            return (name: byType.type, content: byType.rule)
+        SkillStore.saveSkills(skills)
+    }
+
+    static func saveProcessStrategyJSONIfValid(_ json: String) -> Bool {
+        if SkillStore.saveJSONIfValid(json) { return true }
+        guard let data = json.data(using: .utf8),
+              let oldRules = try? JSONDecoder().decode([ProcessStrategyRule].self, from: data) else {
+            return false
+        }
+        saveRules(oldRules)
+        return true
+    }
+
+    static func validateProcessStrategyJSON(_ json: String) -> Bool {
+        if SkillStore.validateJSON(json) { return true }
+        guard let data = json.data(using: .utf8),
+              let _ = try? JSONDecoder().decode([ProcessStrategyRule].self, from: data) else {
+            return false
+        }
+        return true
+    }
+
+    static func getStrategyManifest() -> [[String: String]] {
+        SkillStore.getStrategyManifest()
+    }
+
+    static func getRule(tag: String) -> (name: String, content: String)? {
+        if let resp = SkillStore.getStrategyResponse(tag: tag) {
+            return (name: resp.name, content: resp.rules)
+        }
+        if let body = SkillStore.getRuleBody(tag: tag) {
+            let skills = SkillStore.loadSkills()
+            let name = skills.first(where: { $0.tag == tag || $0.name == tag })?.name ?? tag
+            return (name: name, content: body)
         }
         return nil
     }
 
-    private static func manifestId(for rule: ProcessStrategyRule) -> String {
-        return rule.type.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Description for `strategyManifest`. Picks the line right after
-    /// "处理目标：" if present (templates start with this header), otherwise the
-    /// first non-empty line. Capped to keep the manifest compact.
-    private static func manifestDescription(for rule: ProcessStrategyRule) -> String {
-        let lines = rule.rule.components(separatedBy: .newlines)
-        for (idx, line) in lines.enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasPrefix("处理目标：") {
-                if idx + 1 < lines.count {
-                    let next = lines[idx + 1].trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !next.isEmpty {
-                        return capped(next, max: 60)
-                    }
-                }
-                let after = trimmed.replacingOccurrences(of: "处理目标：", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !after.isEmpty { return capped(after, max: 60) }
-            }
-        }
-        if let firstNonEmpty = lines.first(where: {
-            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }) {
-            return capped(firstNonEmpty.trimmingCharacters(in: .whitespacesAndNewlines), max: 60)
-        }
-        return ""
-    }
-
-    private static func capped(_ text: String, max limit: Int) -> String {
-        if text.count <= limit { return text }
-        let prefix = text.prefix(limit)
-        return String(prefix) + "…"
-    }
-
     static func applyChanges(_ changes: [ProcessStrategyChange]) {
-        var rules = loadRules()
-        var nextId = (rules.map { $0.id }.max() ?? 0) + 1
-        
-        for change in changes {
-            let action = change.action.lowercased()
-            if action == "delete" {
-                rules.removeAll { $0.type == change.type }
-                continue
-            }
-            if let idx = rules.firstIndex(where: { $0.type == change.type }) {
-                if action == "update" || action == "add" {
-                    let current = rules[idx]
-                    rules[idx] = ProcessStrategyRule(id: current.id, type: change.type, rule: change.rule)
-                }
-            } else {
-                if action == "add" || action == "update" {
-                    rules.append(ProcessStrategyRule(id: nextId, type: change.type, rule: change.rule))
-                    nextId += 1
-                }
-            }
-        }
-        saveRules(rules)
-    }
-    
-    private static func encodeRules(_ rules: [ProcessStrategyRule]) -> String? {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
-        guard let data = try? encoder.encode(rules) else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private static func setStrategyJSONString(_ json: String, source: String) {
-        if Thread.isMainThread {
-            setStrategyJSONStringOnMain(json, source: source)
-        } else {
-            // Use async to avoid deadlock: bleQueue callbacks call this while the main
-            // thread may be blocked on bleQueue.sync (via runOnBLEQueueSync), causing
-            // a mutual lock if we use DispatchQueue.main.sync here.
-            DispatchQueue.main.async {
-                setStrategyJSONStringOnMain(json, source: source)
-            }
-        }
-    }
-
-    private static func setStrategyJSONStringOnMain(_ json: String, source: String) {
-        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let defaults = UserDefaults.standard
-        let old = defaults.string(forKey: key)
-        // Avoid unnecessary disk writes when content is unchanged.
-        guard old != trimmed else { return }
-        defaults.set(trimmed, forKey: key)
-        NotificationCenter.default.post(
-            name: didChangeNotification,
-            object: nil,
-            userInfo: ["json": trimmed, "source": source]
-        )
-    }
-    
-    private static func defaultRules() -> [ProcessStrategyRule] {
-        return [
-            ProcessStrategyRule(
-                id: 1,
-                type: "外卖/骑手",
-                rule: """
-    处理目标：
-    在不额外暴露信息的前提下，完成交付指引。
-
-    处理要点：
-    1) 不主动提供地址信息
-    2) 若对方已准确说出地址，仅作确认
-    3) 给出统一、预设的放置方式
-
-    示例：
-    - “你按订单备注放就可以。”
-    - “直接放到指定位置就行。”
-    """
-            ),
-            ProcessStrategyRule(
-                id: 2,
-                type: "快递/驿站/派件",
-                rule: """
-    处理目标：
-    只处理投递方式，不处理任何身份或隐私验证。
-
-    处理要点：
-    1) 可确认快递公司名称
-    2) 告知统一投递方式
-    3) 不提供身份证、验证码等信息
-
-    示例：
-    - “直接放驿站就行。”
-    - “你按之前的方式放就可以。”
-    """
-            ),
-            ProcessStrategyRule(
-                id: 3,
-                type: "运营商（移动/联通/电信）",
-                rule: """
-    处理目标：
-    明确拒绝，不进入讨论。
-
-    示例：
-    - “我这边不办理，谢谢。”
-    """
-            ),
-            ProcessStrategyRule(
-                id: 4,
-                type: "银行/保险/贷款/理财",
-                rule: """
-    处理目标：
-    不确认、不核验、不办理。
-
-    示例：
-    - “这类事情我这边不处理，有需要会通过官方渠道联系。”
-    """
-            ),
-            ProcessStrategyRule(
-                id: 5,
-                type: "营销/推销/房产/课程/广告",
-                rule: """
-    处理目标：
-    明确拒绝 + 要求不再来电/删除外呼名单；
-    若重复拨打，直接警告将投诉。
-
-    处理要点：
-    1) 默认直接表明：不需要
-    2) 明确要求：不要再打过来，并将该号码从外呼名单删除
-    3) 若对方继续纠缠或已多次来电：升级为投诉警告，并结束通话
-
-    示例：
-    - “不需要。请不要再打过来，并把这个号码从你们外呼名单里删除。”
-    - “已经多次来电了，请立刻删除号码；再打我会直接投诉。”
-    - “请停止外呼，这个号码已明确拒绝。再联系我将投诉处理。”
-    """
-            ),
-            ProcessStrategyRule(
-                id: 6,
-                type: "熟人来电（系统已识别为有姓名的来电）",
-                rule: """
-    处理目标：
-    模拟“真实人类代接熟人电话”的行为方式：
-    自然、克制、以转达为主，不替本人做决定。
-
-    处理要点：
-    1) 默认认为对方是认识机主的人，无需再次核验身份
-    2) 不主动解释机主的状态（如忙不忙、在哪里、为何不接）
-    3) 统一使用“暂时不方便”作为原因描述
-    4) 核心动作是：听 → 记 → 转达
-
-    处理策略：
-    - 若对方直接找机主：
-      → 表达暂时不方便接听
-      → 询问是否需要转达事项
-    - 若对方说明具体事情：
-      → 简要确认要点
-      → 表示会转达给本人
-
-    示例：
-    - “他现在不太方便接电话，我可以帮你转达。”
-    - “你简单说下什么事，我帮你记一下。”
-    - “这个我先帮你转达，他回头再联系你。”
-    """
-            ),
-            ProcessStrategyRule(
-                id: 7,
-                type: "未归类来电（兜底分流规则）",
-                rule: """
-    处理目标：
-    不尝试解决问题本身；
-    只做信息确认与转达，避免继续展开对话。
-
-    处理原则：
-    1) 不主动给建议
-    2) 不回答判断性、方案性问题
-    3) 不提供任何个人信息或态度性结论
-    4) 将对话收敛到“转达”这一动作
-
-    处理步骤：
-    1) 确认对方身份或来源
-    2) 确认需要转达的核心事项
-    3) 明确由本人后续处理
-
-    示例：
-    - “这个事情我这边没法直接处理，我可以帮你转达。”
-    - “我先帮你记下来，具体需要他本人来决定。”
-    - “我这边只是代接电话，相关事项我会转达给他。”
-    """
+        let isZh = currentLanguage == .zh
+        let skillChanges = changes.map { change in
+            let tag = tagFromType(change.type)
+            let name = canonicalName(for: tag, originalType: change.type, isZh: isZh)
+            return SkillChange(
+                tag: tag,
+                name: name,
+                description: "",
+                priority: "normal",
+                body: change.rule,
+                action: change.action
             )
+        }
+        SkillStore.applyChanges(skillChanges)
+    }
+
+    private static func canonicalName(for tag: String, originalType: String, isZh: Bool) -> String {
+        let zhNames: [String: String] = [
+            "express": "快递", "takeout": "外卖", "telecom": "运营商",
+            "finance": "银行金融", "marketing": "营销推销",
+            "acquaintance": "熟人来电", "unknown": "未归类来电"
         ]
+        let enNames: [String: String] = [
+            "express": "Express", "takeout": "Takeout", "telecom": "Telecom",
+            "finance": "Finance", "marketing": "Marketing",
+            "acquaintance": "Contacts", "unknown": "Unknown"
+        ]
+        if isZh { return zhNames[tag] ?? originalType }
+        return enNames[tag] ?? originalType
+    }
+
+    private static var currentLanguage: Language {
+        if let raw = UserDefaults.standard.string(forKey: "callmate.language"),
+           let lang = Language(rawValue: raw) { return lang }
+        return .zh
+    }
+
+    private static func tagFromType(_ type: String) -> String {
+        let map: [String: String] = [
+            "外卖": "takeout", "外卖/骑手": "takeout",
+            "快递": "express", "快递/驿站/派件": "express",
+            "运营商": "telecom", "运营商（移动/联通/电信）": "telecom",
+            "金融推销": "finance", "银行/保险/贷款/理财": "finance",
+            "营销推销": "marketing", "营销/推销/房产/课程/广告": "marketing",
+            "熟人来电": "acquaintance", "熟人来电（系统已识别为有姓名的来电）": "acquaintance",
+            "未知来电": "unknown", "未归类来电（兜底分流规则）": "unknown"
+        ]
+        if let tag = map[type] { return tag }
+        let knownTags: Set<String> = ["express", "takeout", "telecom", "finance", "marketing", "acquaintance", "unknown"]
+        let lower = type.lowercased()
+        if knownTags.contains(lower) { return lower }
+        return lower
+            .components(separatedBy: CharacterSet.alphanumerics.union(.init(charactersIn: "_")).inverted)
+            .joined(separator: "_")
+            .trimmingCharacters(in: .init(charactersIn: "_"))
     }
 }

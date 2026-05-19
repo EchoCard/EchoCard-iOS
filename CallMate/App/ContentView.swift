@@ -53,6 +53,8 @@ struct ContentView: View {
     /// True after user enters the binding scan flow; consumed on first transition to `.main` to
     /// push fillers to the **new** board only (not on every cold launch / restore to main).
     @State private var pendingFillerPreloadAfterScanSession = false
+    @State private var ownerNotifyRequest: CallSessionController.OwnerNotifyRequest?
+    @State private var showOwnerNotifyAlert: Bool = false
 
     @MainActor
     init(appServices: AppServices? = nil, appRouter: AppRouter? = nil) {
@@ -88,6 +90,30 @@ struct ContentView: View {
     // Stage 2b: call-routing observers
     private var containerWithObservers: some View {
         containerWithAppObservers
+            .onChange(of: liveBLEController.pendingOwnerNotify?.id) { _, newId in
+                guard let req = liveBLEController.pendingOwnerNotify, newId != nil else { return }
+                ownerNotifyRequest = req
+                showOwnerNotifyAlert = true
+                liveBLEController.pendingOwnerNotify = nil
+            }
+            .alert(isPresented: $showOwnerNotifyAlert) {
+                let req = ownerNotifyRequest
+                let isZh = language == .zh
+                let title = isZh ? "来电转接提醒" : "Call Transfer Notice"
+                let caller = req?.callerIdentity ?? ""
+                let reason = req?.reason ?? ""
+                let body: String
+                if isZh {
+                    body = caller.isEmpty ? reason : "来电人：\(caller)\n\(reason.isEmpty ? "" : "原因：\(reason)")"
+                } else {
+                    body = caller.isEmpty ? reason : "Caller: \(caller)\n\(reason.isEmpty ? "" : "Reason: \(reason)")"
+                }
+                return Alert(
+                    title: Text(title),
+                    message: Text(body),
+                    dismissButton: .default(Text(isZh ? "知道了" : "Got it"))
+                )
+            }
             .onChange(of: contentBLEState.snapshot.lastIncomingCall) { _, newValue in
                 guard let call = newValue, appState == .main else { return }
                 guard isLocalUplinkTestArmed else { return }

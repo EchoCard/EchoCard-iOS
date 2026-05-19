@@ -17,6 +17,14 @@ extension CallSessionController {
         let updatedRules: [RuleChangeItem]
     }
 
+    /// notify_owner tool 触发的机主通知请求
+    struct OwnerNotifyRequest: Identifiable, Equatable {
+        let id: String
+        let callerIdentity: String
+        let reason: String
+        let urgency: String
+    }
+
     /// A request from the AI to create a new outbound prompt template.
     struct OutboundTemplateRequest: Identifiable, Equatable {
         let id: String   // callId from tool call

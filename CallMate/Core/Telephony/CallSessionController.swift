@@ -97,6 +97,7 @@ final class CallSessionController: NSObject, ObservableObject {
     @Published var lastErrorMessage: String?
     @Published var isAIHangup: Bool = false  // AI 主动挂断标记
     @Published var pendingRuleChange: RuleChangeRequest?
+    @Published var pendingOwnerNotify: OwnerNotifyRequest?
     @Published var pendingGuideImage: GuideImageRequest?
     @Published var pendingGuideCard: GuideCardRequest?
     @Published var pendingCreateTemplate: OutboundTemplateRequest?

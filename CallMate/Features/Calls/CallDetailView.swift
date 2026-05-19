@@ -237,14 +237,8 @@ struct CallDetailView: View {
     }
     
     var body: some View {
-        // 不要套 NavigationStack：本视图是 ZStack overlay 层（不是 push 进来的）。
-        // 嵌套 NavigationStack 的 .toolbar(.cancellationAction) 在刚 dismiss 完
-        // fullScreenCover（如 LiveCallView）后会和上层 SwiftUI dismiss 链冲突，导致
-        // 左上角返回按钮要点 3-4 次 action 才生效（按钮视觉按下动画正常）。改用自定义
-        // header，避免触发 NavigationStack 的内部 dismiss 路径。
-        GeometryReader { geo in
-            VStack(spacing: 0) {
-                header(topInset: geo.safeAreaInsets.top)
+        NavigationStack {
+            GeometryReader { geo in
                 ZStack(alignment: .bottom) {
                     ScrollViewReader { proxy in
                         ScrollView(showsIndicators: false) {
@@ -299,9 +293,40 @@ struct CallDetailView: View {
                     Color.clear.preference(key: ScreenFramePreferenceKey.self, value: g.frame(in: .global))
                 })
             }
-            .ignoresSafeArea(edges: .top)
+            .onPreferenceChange(ScreenFramePreferenceKey.self) { screenFrameInGlobal = $0 }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        Text(detailNavigationTitle)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                        if !isTest {
+                            headerMetaRow
+                        }
+                    }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                    }
+                }
+                if hasDialablePhone {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button {
+                            openDialerWithNumber(call.phone)
+                        } label: {
+                            Image(systemName: "phone")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Color(hex: "34C759"))
+                        }
+                    }
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .onPreferenceChange(ScreenFramePreferenceKey.self) { screenFrameInGlobal = $0 }
         .background {
             detailBackground.ignoresSafeArea()
         }
@@ -340,10 +365,8 @@ struct CallDetailView: View {
             VStack(spacing: 2) {
                 Text(detailNavigationTitle)
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-                if !isTest {
-                    headerMetaRow
-                }
+                    .foregroundStyle(Color.black)
+                headerMetaRow
             }
             
             Spacer()
@@ -764,18 +787,12 @@ struct CallDetailView: View {
                 .foregroundStyle(Color(hex: "8E8E93"))
                 .frame(maxWidth: .infinity, alignment: .center)
 
-            HStack(spacing: 24) {
+            HStack(spacing: 40) {
                 FeedbackButton(
                     icon: "hand.thumbsdown.fill",
                     label: t("不好", "Bad"),
                     color: AppColors.error
                 ) { setFeedback("bad") }
-
-                FeedbackButton(
-                    icon: "minus.circle.fill",
-                    label: t("一般", "Fair"),
-                    color: AppColors.warning
-                ) { setFeedback("average") }
 
                 FeedbackButton(
                     icon: "hand.thumbsup.fill",
@@ -862,6 +879,7 @@ struct CallDetailView: View {
                 inlineMessagesMode: true,
                 voiceControl: feedbackVoiceControl,
                 showCloseButton: false,
+                onTest: nil,
                 initialMessages: feedbackInitialMessages(for: selectedFeedbackType),
                 showInitialMessage: false,
                 initMessagesOverride: feedbackInitMessages(for: selectedFeedbackType),

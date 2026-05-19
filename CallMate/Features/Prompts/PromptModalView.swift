@@ -5,47 +5,28 @@
 
 import SwiftUI
 
-// MARK: - Rule Parsed Sections (design: 处理目标 / 处理要点 / 示例)
+// MARK: - Rule Parsed Sections（Skill 格式：条件→处理 / ## 禁止）
+
 private struct ParsedRuleSections {
-    var goal: String?
-    var points: String?
-    var examples: String?
+    var rules: [String] = []      // ## 禁止 之前的条件→处理行
+    var forbidden: [String] = []  // ## 禁止 之后的行
 }
 
-private func parseRuleSections(_ rule: String) -> ParsedRuleSections {
-    var goal: String?
-    var points: String?
-    var examples: String?
-    let sectionPatterns: [(String, (String) -> Void)] = [
-        ("处理目标", { goal = $0 }),
-        ("处理要点", { points = (points ?? "") + ($0.isEmpty ? "" : $0 + "\n") }),
-        ("处理原则", { points = (points ?? "") + ($0.isEmpty ? "" : $0 + "\n") }),
-        ("处理策略", { points = (points ?? "") + ($0.isEmpty ? "" : $0 + "\n") }),
-        ("处理步骤", { points = (points ?? "") + ($0.isEmpty ? "" : $0 + "\n") }),
-        ("示例", { examples = $0 })
-    ]
-    let remaining = rule.trimmingCharacters(in: .whitespacesAndNewlines)
-    for (title, setter) in sectionPatterns {
-        let marker = title + "："
-        if let range = remaining.range(of: marker) {
-            let start = range.upperBound
-            var end = remaining.endIndex
-            for (otherTitle, _) in sectionPatterns where otherTitle != title {
-                let otherMarker = otherTitle + "："
-                if let otherRange = remaining.range(of: otherMarker, range: start..<remaining.endIndex),
-                   otherRange.lowerBound < end {
-                    end = otherRange.lowerBound
-                }
-            }
-            let content = String(remaining[start..<end])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            setter(content)
-        }
+private func parseRuleSections(_ body: String) -> ParsedRuleSections {
+    var rules: [String] = []
+    var forbidden: [String] = []
+    var inForbidden = false
+    for line in body.components(separatedBy: .newlines) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("## 禁止") { inForbidden = true; continue }
+        if trimmed.hasPrefix("##") { inForbidden = false; continue }
+        guard !trimmed.isEmpty else { continue }
+        if inForbidden { forbidden.append(trimmed) } else { rules.append(trimmed) }
     }
-    return ParsedRuleSections(goal: goal, points: points, examples: examples)
+    return ParsedRuleSections(rules: rules, forbidden: forbidden)
 }
 
-// MARK: - Category Visual Config
+// MARK: - Category Visual Config（key = SkillRule.tag）
 
 private struct RuleCategoryConfig {
     let displayTitle: String
@@ -56,49 +37,49 @@ private struct RuleCategoryConfig {
 }
 
 private let categoryConfigs: [String: RuleCategoryConfig] = [
-    "快递": RuleCategoryConfig(
+    "express": RuleCategoryConfig(
         displayTitle: "快递服务",
         subtitle: "快递/驿站/派件/取件",
         iconName: "shippingbox",
         color: Color(hex: "34C759"),
         colorHex: "34C759"
     ),
-    "外卖": RuleCategoryConfig(
+    "takeout": RuleCategoryConfig(
         displayTitle: "外卖骑手",
         subtitle: "外卖/骑手",
         iconName: "bicycle",
         color: Color(hex: "FF9500"),
         colorHex: "FF9500"
     ),
-    "运营商": RuleCategoryConfig(
+    "telecom": RuleCategoryConfig(
         displayTitle: "运营商",
         subtitle: "移动/联通/电信",
         iconName: "wifi",
         color: Color(hex: "5856D6"),
         colorHex: "5856D6"
     ),
-    "银行": RuleCategoryConfig(
+    "finance": RuleCategoryConfig(
         displayTitle: "银行保险",
         subtitle: "银行/保险/贷款/理财",
         iconName: "building.columns",
         color: Color(hex: "5AC8FA"),
         colorHex: "5AC8FA"
     ),
-    "营销": RuleCategoryConfig(
+    "marketing": RuleCategoryConfig(
         displayTitle: "营销广告",
         subtitle: "推销/房产/课程/广告",
         iconName: "megaphone",
         color: Color(hex: "A2845E"),
         colorHex: "A2845E"
     ),
-    "熟人": RuleCategoryConfig(
+    "acquaintance": RuleCategoryConfig(
         displayTitle: "熟人来电",
-        subtitle: "熟人/朋友",
+        subtitle: "通讯录联系人",
         iconName: "person.2",
         color: Color(hex: "007AFF"),
         colorHex: "007AFF"
     ),
-    "未归类": RuleCategoryConfig(
+    "unknown": RuleCategoryConfig(
         displayTitle: "未归类来电",
         subtitle: "未分类/兜底",
         iconName: "questionmark.circle",
@@ -107,14 +88,12 @@ private let categoryConfigs: [String: RuleCategoryConfig] = [
     )
 ]
 
-private func configForRule(_ rule: ProcessStrategyRule) -> RuleCategoryConfig {
-    let type = rule.type
-    for (key, config) in categoryConfigs {
-        if type.contains(key) { return config }
-    }
+private func configForSkill(_ skill: SkillRule) -> RuleCategoryConfig {
+    if let config = categoryConfigs[skill.tag] { return config }
+    // 兜底：用 name 做简单匹配（用户自定义 skill）
     return RuleCategoryConfig(
-        displayTitle: type,
-        subtitle: "",
+        displayTitle: skill.name,
+        subtitle: skill.description,
         iconName: "questionmark.circle",
         color: Color(hex: "8E8E93"),
         colorHex: "8E8E93"
@@ -131,7 +110,7 @@ struct PromptModalView: View {
     private func t(_ zh: String, _ en: String) -> String { language == .zh ? zh : en }
 
     @State private var showRuleConfig = false
-    @State private var rules: [ProcessStrategyRule] = ProcessStrategyStore.loadRules()
+    @State private var skills: [SkillRule] = SkillStore.loadSkills()
     @State private var toastMessage: String?
 
     var body: some View {
@@ -139,7 +118,7 @@ struct PromptModalView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     secBanner
-                    rulesCardsSection
+                    skillCardsSection
                 }
                 .padding(EdgeInsets(top: 8, leading: 16, bottom: 40, trailing: 16))
             }
@@ -181,7 +160,7 @@ struct PromptModalView: View {
             }
         }
         .onAppear {
-            rules = ProcessStrategyStore.loadRules()
+            skills = SkillStore.loadSkills()
         }
         .onChange(of: toastMessage) { _, newValue in
             if newValue != nil {
@@ -246,35 +225,36 @@ struct PromptModalView: View {
         )
     }
 
-    // MARK: - Rule Category Cards
+    // MARK: - Skill Category Cards
 
-    private var sortedRules: [ProcessStrategyRule] {
-        let displayOrder = ["快递", "外卖", "运营商", "银行", "营销", "熟人", "未归类"]
-        return rules.sorted { a, b in
-            let ai = displayOrder.firstIndex(where: { a.type.contains($0) }) ?? displayOrder.count
-            let bi = displayOrder.firstIndex(where: { b.type.contains($0) }) ?? displayOrder.count
+    private let displayOrder = ["express", "takeout", "telecom", "finance", "marketing", "acquaintance", "unknown"]
+
+    private var sortedSkills: [SkillRule] {
+        skills.sorted { a, b in
+            let ai = displayOrder.firstIndex(of: a.tag) ?? displayOrder.count
+            let bi = displayOrder.firstIndex(of: b.tag) ?? displayOrder.count
             return ai < bi
         }
     }
 
-    private var rulesCardsSection: some View {
+    private var skillCardsSection: some View {
         VStack(spacing: 16) {
-            ForEach(sortedRules) { rule in
-                RuleExpandedCard(rule: rule, language: language)
+            ForEach(sortedSkills) { skill in
+                SkillExpandedCard(skill: skill, language: language)
             }
         }
     }
 }
 
-// MARK: - Rule Expanded Card (inline full detail)
+// MARK: - Skill Expanded Card
 
-private struct RuleExpandedCard: View {
-    let rule: ProcessStrategyRule
+private struct SkillExpandedCard: View {
+    let skill: SkillRule
     let language: Language
 
     private func t(_ zh: String, _ en: String) -> String { language == .zh ? zh : en }
-    private var config: RuleCategoryConfig { configForRule(rule) }
-    private var sections: ParsedRuleSections { parseRuleSections(rule.rule) }
+    private var config: RuleCategoryConfig { configForSkill(skill) }
+    private var sections: ParsedRuleSections { parseRuleSections(skill.body) }
 
     private var subtitleTags: [String] {
         config.subtitle
@@ -329,8 +309,8 @@ private struct RuleExpandedCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 cardHeader
                     .padding(.bottom, 18)
-                goalAndPointsBlock
-                examplesBlock
+                rulesBlock
+                forbiddenBlock
             }
             .padding(18)
         }
@@ -388,52 +368,25 @@ private struct RuleExpandedCard: View {
         }
     }
 
-    // MARK: - Goal + Key Points
+    // MARK: - 处理规则（条件 → 处理方式）
 
-    private var goalAndPointsBlock: some View {
-        let goal = sections.goal?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let points = sections.points?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let hasGoal = !goal.isEmpty
-        let hasPoints = !points.isEmpty
-
+    private var rulesBlock: some View {
+        let rules = sections.rules
         return Group {
-            if hasGoal || hasPoints {
-                VStack(alignment: .leading, spacing: 0) {
-                    if hasGoal {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(t("处理目标", "Goal"))
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Color(hex: "86868B"))
-                                .tracking(0.3)
-                            Text(goal)
+            if !rules.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(t("处理规则", "Handling Rules"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color(hex: "86868B"))
+                        .tracking(0.3)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(rules, id: \.self) { line in
+                            Text(line)
                                 .font(.system(size: 14))
                                 .foregroundStyle(Color(hex: "3A3A3C"))
-                                .lineSpacing(6)
-                        }
-                    }
-
-                    if hasGoal && hasPoints {
-                        Rectangle()
-                            .fill(Color.black.opacity(0.05))
-                            .frame(height: 0.5)
-                            .padding(.vertical, 14)
-                    }
-
-                    if hasPoints {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(t("处理要点", "Key Points"))
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Color(hex: "86868B"))
-                                .tracking(0.3)
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(pointLines(points), id: \.self) { line in
-                                    Text(line)
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(Color(hex: "3A3A3C"))
-                                        .lineSpacing(4)
-                                }
-                            }
+                                .lineSpacing(4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
@@ -449,33 +402,34 @@ private struct RuleExpandedCard: View {
         }
     }
 
-    // MARK: - Examples (amber card)
+    // MARK: - 禁止事项（红色卡片）
 
-    private var examplesBlock: some View {
-        let examples = sections.examples?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    private var forbiddenBlock: some View {
+        let items = sections.forbidden
         return Group {
-            if !examples.isEmpty {
+            if !items.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(t("示例", "Examples"))
+                    Text(t("禁止", "Restrictions"))
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color(red: 184/255, green: 134/255, blue: 11/255))
+                        .foregroundStyle(Color(red: 200/255, green: 50/255, blue: 50/255))
                         .tracking(0.3)
 
                     VStack(alignment: .leading, spacing: 5) {
-                        ForEach(pointLines(examples), id: \.self) { line in
+                        ForEach(items, id: \.self) { line in
                             Text(line)
                                 .font(.system(size: 13))
-                                .foregroundStyle(Color(red: 107/255, green: 91/255, blue: 62/255))
+                                .foregroundStyle(Color(red: 150/255, green: 40/255, blue: 40/255))
                                 .lineSpacing(4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(red: 1, green: 179/255, blue: 64/255).opacity(0.08))
+                .background(Color(red: 1, green: 59/255, blue: 48/255).opacity(0.06))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(red: 1, green: 179/255, blue: 64/255).opacity(0.18), lineWidth: 0.5)
+                        .stroke(Color(red: 1, green: 59/255, blue: 48/255).opacity(0.15), lineWidth: 0.5)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.top, 12)
@@ -483,13 +437,4 @@ private struct RuleExpandedCard: View {
         }
     }
 
-    private func pointLines(_ text: String) -> [String] {
-        text.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-    }
 }
-
-// MARK: - Identifiable conformance for sheet
-
-extension ProcessStrategyRule: Identifiable {}
