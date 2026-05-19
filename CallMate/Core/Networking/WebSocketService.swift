@@ -270,11 +270,14 @@ class WebSocketService: NSObject, ObservableObject {
     /// 开关：scene=init_config 时是否在 hello 中发送 init_config 调试 prompt。默认开。
     private let initConfigSendPromptEnabledKey = "ws_init_config_send_prompt_enabled"
     private let voiceIdKey = "callmate.voiceId"
-    private let callScenePromptResourceName = "daijie"
     private let initConfigPromptResourceName = "init_config"
     private let initAndEvaluationPromptResourceName = "config"
     private let promptResourceExtension = "txt"
     private let promptSubdirectory = "Prompts"
+    private let callEndMarkerToken = "✿END✿"
+    private let callEndMarkerInstruction = "【✿END✿】仅当本轮之后不应再由你开口、且通话可以结束时，才在本轮回复末尾追加 ✿END✿（例：对方已挂断；对方明确要求结束且你无需再补充；任务已完全达成且只剩简短道别）。不要在开场寒暄、信息未问全、尚在协商或追问、等待对方回应、多轮任务中途追加 ✿END✿。"
+    private let outboundSystemRulesResourceName = "outbound_call_system_rules"
+    private let outboundSystemBansResourceName = "outbound_call_system_bans"
 
     
     // MARK: - 状态
@@ -858,7 +861,7 @@ class WebSocketService: NSObject, ObservableObject {
                     print("[WS] hello call_outbound business_prompt LEGACY(full-body) len=\(businessPrompt.count) bizVarKeys=\(bizVars.keys.sorted())")
                 }
                 if !businessPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    templateVars["business_prompt"] = businessPrompt
+                    templateVars["business_prompt"] = assembleOutboundCallPrompt(from: businessPrompt)
                 } else {
                     print("[WS] ERROR call_outbound: business_prompt empty after extract+fallback")
                 }
@@ -900,6 +903,12 @@ class WebSocketService: NSObject, ObservableObject {
             if !callCtx.callHistorySummary.isEmpty {
                 templateVars["callHistorySummary"] = callCtx.callHistorySummary
             }
+            let manifest = SkillStore.getStrategyManifest()
+            if !manifest.isEmpty {
+                templateVars["strategyManifest"] = manifest
+            }
+        } else if helloScene != .updateConfig && helloScene != .callOutbound {
+            templateVars["rule_summary"] = SkillStore.getRuleSummary()
         }
 
         if !templateVars.isEmpty {
@@ -1561,7 +1570,7 @@ class WebSocketService: NSObject, ObservableObject {
     private func promptResourceName(for scene: WebSocketScene) -> String? {
         switch scene {
         case .call:
-            return callScenePromptResourceName
+            return nil
         case .initConfig:
             return initConfigPromptResourceName
         case .evaluation:
@@ -1641,8 +1650,44 @@ class WebSocketService: NSObject, ObservableObject {
             print("[WS] prompt resource is empty for scene=\(scene.rawValue)")
             return nil
         }
-        cachedPromptsByResourceName[resourceName] = prompt
-        return prompt
+        let assembled = resourceName == "outbound_call"
+            ? assembleOutboundCallPrompt(from: prompt)
+            : prompt
+        cachedPromptsByResourceName[resourceName] = assembled
+        return assembled
+    }
+
+    @MainActor
+    private func assembleOutboundCallPrompt(from aiPrompt: String) -> String {
+        let trimmedPrompt = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else { return aiPrompt }
+
+        var parts: [String] = [trimmedPrompt]
+        if let systemRules = loadTextResource(named: outboundSystemRulesResourceName) {
+            parts.append(systemRules)
+        }
+        if let systemBans = loadTextResource(named: outboundSystemBansResourceName) {
+            parts.append(systemBans)
+        }
+        if !trimmedPrompt.contains(callEndMarkerToken) {
+            parts.append(callEndMarkerInstruction)
+        }
+        return parts.joined(separator: "\n\n")
+    }
+
+    @MainActor
+    private func loadTextResource(named name: String) -> String? {
+        let bundle = Bundle.main
+        let url = bundle.url(
+            forResource: name,
+            withExtension: promptResourceExtension,
+            subdirectory: promptSubdirectory
+        ) ?? bundle.url(forResource: name, withExtension: promptResourceExtension)
+        guard let url else {
+            print("[WS] system prompt resource not found: \(name)")
+            return nil
+        }
+        return try? String(contentsOf: url, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func parseToolArguments(_ rawArguments: Any?) -> [String: Any] {

@@ -454,6 +454,30 @@ struct FeedbackChatModalView: View {
                                     "Hi, I am your AI Private Secretary. Ask me anything or adjust settings.")
                 messages.append(ExtendedMessage(id: allocateMessageID(), sender: .ai, text: initialText, msgType: .text))
             }
+            let gaps = CallGapStore.loadAll()
+            if !gaps.isEmpty {
+                for gap in gaps {
+                    let gapText: String
+                    if language == .zh {
+                        var parts = [String]()
+                        if !gap.scene.isEmpty { parts.append("📞 场景：\(gap.scene)") }
+                        if !gap.handling.isEmpty { parts.append("处理方式：\(gap.handling)") }
+                        if !gap.question.isEmpty { parts.append("💡 建议补充：\(gap.question)") }
+                        gapText = parts.joined(separator: "\n")
+                    } else {
+                        var parts = [String]()
+                        if !gap.scene.isEmpty { parts.append("📞 Scene: \(gap.scene)") }
+                        if !gap.handling.isEmpty { parts.append("Handled as: \(gap.handling)") }
+                        if !gap.question.isEmpty { parts.append("💡 Suggested rule: \(gap.question)") }
+                        gapText = parts.joined(separator: "\n")
+                    }
+                    messages.append(ExtendedMessage(id: allocateMessageID(), sender: .ai, text: gapText, msgType: .text))
+                    CallGapStore.delete(id: gap.id)
+                }
+                let promptText = t("以上是上次通话中遇到的场景，需要帮你补充相应的规则吗？",
+                                   "These are scenes from the last call. Want me to add rules for them?")
+                messages.append(ExtendedMessage(id: allocateMessageID(), sender: .ai, text: promptText, msgType: .text))
+            }
             }
             .onDisappear {
             persistDebounceTask?.cancel()
